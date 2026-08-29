@@ -171,7 +171,7 @@ public class MainActivity extends Activity {
         headerContainer = vertical();
         shell.addView(headerContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(68)
+                dp(64)
         ));
 
         scrollView = new ScrollView(this);
@@ -191,11 +191,12 @@ public class MainActivity extends Activity {
         ));
 
         bottomNavigation = horizontal();
+        bottomNavigation.setGravity(Gravity.CENTER_VERTICAL);
         bottomNavigation.setBackgroundColor(CARD);
         bottomNavigation.setElevation(dp(10));
         shell.addView(bottomNavigation, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(66)
+                dp(64)
         ));
         setContentView(shell);
     }
@@ -226,30 +227,35 @@ public class MainActivity extends Activity {
     private View buildAppBar() {
         LinearLayout bar = horizontal();
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(16), dp(8), dp(12), dp(8));
+        bar.setPadding(dp(16), dp(7), dp(16), dp(7));
         bar.setBackgroundColor(CARD);
 
         if (TAB_HOME.equals(currentTab)) {
             TextView mark = text("穿", 17, Color.WHITE, Typeface.BOLD);
             mark.setGravity(Gravity.CENTER);
             mark.setBackground(rounded(GREEN, GREEN, dp(8)));
-            bar.addView(mark, new LinearLayout.LayoutParams(dp(38), dp(38)));
+            bar.addView(mark, new LinearLayout.LayoutParams(dp(36), dp(36)));
         }
 
         LinearLayout titles = vertical();
         titles.setPadding(TAB_HOME.equals(currentTab) ? dp(10) : dp(2), 0, 0, 0);
-        titles.addView(text(appBarTitle(), 20, INK, Typeface.BOLD));
-        titles.addView(text(appBarSubtitle(), 11, MUTED, Typeface.NORMAL));
+        TextView title = text(appBarTitle(), 20, INK, Typeface.BOLD);
+        title.setIncludeFontPadding(false);
+        TextView subtitle = text(appBarSubtitle(), 11, MUTED, Typeface.NORMAL);
+        subtitle.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        subtitleParams.topMargin = dp(3);
+        titles.addView(title);
+        titles.addView(subtitle, subtitleParams);
         bar.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         if (TAB_WARDROBE.equals(currentTab)) {
-            TextView add = iconButton(AppIconDrawable.PLUS, "添加衣物", GREEN);
+            ImageView add = iconButton(AppIconDrawable.PLUS, "添加衣物", GREEN);
             add.setOnClickListener(view -> showGarmentDialog());
             bar.addView(add);
-        } else if (TAB_HOME.equals(currentTab)) {
-            TextView camera = iconButton(AppIconDrawable.CAMERA, "拍照记录", GREEN);
-            camera.setOnClickListener(view -> launchWearCamera());
-            bar.addView(camera);
         }
         return bar;
     }
@@ -281,10 +287,10 @@ public class MainActivity extends Activity {
     }
 
     private void buildBottomNavigation() {
-        bottomNavigation.addView(navigationItem("首页", TAB_HOME, AppIconDrawable.HOME), weightedWrap());
-        bottomNavigation.addView(navigationItem("衣橱", TAB_WARDROBE, AppIconDrawable.WARDROBE), weightedWrap());
-        bottomNavigation.addView(navigationItem("搭配", TAB_OUTFITS, AppIconDrawable.OUTFIT), weightedWrap());
-        bottomNavigation.addView(navigationItem("统计", TAB_STATS, AppIconDrawable.STATS), weightedWrap());
+        bottomNavigation.addView(navigationItem("首页", TAB_HOME, AppIconDrawable.HOME), weightedMatch());
+        bottomNavigation.addView(navigationItem("衣橱", TAB_WARDROBE, AppIconDrawable.WARDROBE), weightedMatch());
+        bottomNavigation.addView(navigationItem("搭配", TAB_OUTFITS, AppIconDrawable.OUTFIT), weightedMatch());
+        bottomNavigation.addView(navigationItem("统计", TAB_STATS, AppIconDrawable.STATS), weightedMatch());
     }
 
     private View navigationItem(String label, String tab, String icon) {
@@ -292,19 +298,23 @@ public class MainActivity extends Activity {
         int color = selected ? GREEN : 0xff8a938f;
         LinearLayout item = vertical();
         item.setGravity(Gravity.CENTER);
+        item.setMinimumHeight(dp(64));
         item.setClickable(true);
         item.setFocusable(true);
         item.setContentDescription(label);
 
         ImageView iconView = new ImageView(this);
-        iconView.setImageDrawable(icon(icon, color, 23));
-        item.addView(iconView, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        iconView.setScaleType(ImageView.ScaleType.CENTER);
+        iconView.setImageDrawable(icon(icon, color, 22));
+        item.addView(iconView, new LinearLayout.LayoutParams(dp(23), dp(23)));
         TextView title = text(label, 11, color, selected ? Typeface.BOLD : Typeface.NORMAL);
+        title.setIncludeFontPadding(false);
+        title.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                dp(17)
         );
-        titleParams.topMargin = dp(3);
+        titleParams.topMargin = dp(2);
         item.addView(title, titleParams);
         item.setOnClickListener(view -> {
             if (!tab.equals(currentTab)) {
@@ -472,7 +482,13 @@ public class MainActivity extends Activity {
         unitView.setPadding(dp(2), 0, 0, dp(3));
         number.addView(unitView);
         box.addView(number);
-        box.addView(text(label, 11, MUTED, Typeface.NORMAL));
+        TextView labelView = text(label, 11, MUTED, Typeface.NORMAL);
+        labelView.setGravity(Gravity.CENTER);
+        labelView.setIncludeFontPadding(false);
+        box.addView(labelView, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(18)
+        ));
         return box;
     }
 
@@ -493,7 +509,7 @@ public class MainActivity extends Activity {
         info.addView(names);
         row.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        TextView delete = iconButton(AppIconDrawable.TRASH, "删除记录", MUTED);
+        ImageView delete = iconButton(AppIconDrawable.TRASH, "删除记录", MUTED);
         delete.setOnClickListener(view -> {
             database.deleteWearRecord(record.id);
             reloadData();
@@ -505,17 +521,6 @@ public class MainActivity extends Activity {
     }
 
     private void renderWardrobe() {
-        LinearLayout summary = horizontal();
-        summary.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout copy = vertical();
-        copy.addView(text(activeGarments().size() + " 件衣物", 22, INK, Typeface.BOLD));
-        copy.addView(text("建立清晰衣橱，识别会更准确", 12, MUTED, Typeface.NORMAL));
-        summary.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        ActionButton add = actionButton("添加", true, AppIconDrawable.PLUS);
-        add.setOnClickListener(view -> showGarmentDialog());
-        summary.addView(add, new LinearLayout.LayoutParams(dp(96), dp(44)));
-        content.addView(summary);
-
         HorizontalScrollView filters = new HorizontalScrollView(this);
         filters.setHorizontalScrollBarEnabled(false);
         filters.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -525,7 +530,7 @@ public class MainActivity extends Activity {
         filterRow.addView(filterChip("裤子", Category.BOTTOM));
         filterRow.addView(filterChip("鞋", Category.SHOES));
         filters.addView(filterRow);
-        addWithTop(content, filters, dp(18));
+        content.addView(filters);
 
         List<Garment> visible = visibleGarments();
         if (visible.isEmpty()) {
@@ -626,7 +631,7 @@ public class MainActivity extends Activity {
         titleCopy.addView(text("添加衣物", 20, INK, Typeface.BOLD));
         titleCopy.addView(text("正面照片越清晰，自动识别越准确", 11, MUTED, Typeface.NORMAL));
         titleRow.addView(titleCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
+        ImageView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
         close.setOnClickListener(view -> garmentDialog.dismiss());
         titleRow.addView(close);
         form.addView(titleRow);
@@ -746,7 +751,7 @@ public class MainActivity extends Activity {
         top.addView(category);
         View spacer = new View(this);
         top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
-        TextView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
+        ImageView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
         close.setOnClickListener(view -> dialog.dismiss());
         top.addView(close);
         detail.addView(top);
@@ -1413,11 +1418,11 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private TextView iconButton(String iconName, String description, int color) {
-        TextView button = text("", 1, color, Typeface.NORMAL);
-        button.setGravity(Gravity.CENTER);
+    private ImageView iconButton(String iconName, String description, int color) {
+        ImageView button = new ImageView(this);
+        button.setScaleType(ImageView.ScaleType.CENTER);
         button.setContentDescription(description);
-        button.setCompoundDrawablesWithIntrinsicBounds(icon(iconName, color, 21), null, null, null);
+        button.setImageDrawable(icon(iconName, color, 21));
         button.setBackground(rounded(FIELD, LINE, dp(8)));
         button.setClickable(true);
         button.setFocusable(true);
@@ -1560,6 +1565,10 @@ public class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams weightedWrap() {
         return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+    }
+
+    private LinearLayout.LayoutParams weightedMatch() {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
     }
 
     private LinearLayout.LayoutParams weightedWrapWithMargins(int margin) {
