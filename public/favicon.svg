@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="穿了没">
+  <rect width="64" height="64" rx="12" fill="#263b37" />
+  <path d="M21 18l7-5h8l7 5-4 8-5-3v23H30V23l-5 3-4-8z" fill="#f7f4ee" />
+  <path d="M22 48h20" stroke="#b8653c" stroke-width="4" stroke-linecap="round" />
+</svg>
