@@ -1,4 +1,5 @@
 <resources>
-    <color name="paper">#F7F4EE</color>
-    <color name="pine">#263B37</color>
+    <color name="background">#F4F6F5</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="brand_green">#167D5A</color>
 </resources>

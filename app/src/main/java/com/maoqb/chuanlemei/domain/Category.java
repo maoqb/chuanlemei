@@ -25,13 +25,13 @@ public final class Category {
     public static int accentColor(String category) {
         switch (category) {
             case TOP:
-                return 0xff2f6f73;
+                return 0xff167d5a;
             case BOTTOM:
-                return 0xff715c9f;
+                return 0xff4d7fa8;
             case SHOES:
-                return 0xff9a5b38;
+                return 0xffdf8241;
             default:
-                return 0xff263b37;
+                return 0xff17201d;
         }
     }
 

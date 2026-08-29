@@ -2,9 +2,11 @@ package com.maoqb.chuanlemei;
 
 import android.app.Activity;
 import android.app.DatePickerDialog;
+import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -18,14 +20,17 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
-import android.widget.Button;
 import android.widget.EditText;
+import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -34,11 +39,15 @@ import android.widget.Toast;
 import com.maoqb.chuanlemei.data.ImageStore;
 import com.maoqb.chuanlemei.data.WardrobeDatabase;
 import com.maoqb.chuanlemei.domain.Category;
+import com.maoqb.chuanlemei.domain.ChartSeries;
 import com.maoqb.chuanlemei.domain.DateTools;
 import com.maoqb.chuanlemei.domain.Garment;
 import com.maoqb.chuanlemei.domain.PeriodRange;
 import com.maoqb.chuanlemei.domain.StatsCalculator;
 import com.maoqb.chuanlemei.domain.WearRecord;
+import com.maoqb.chuanlemei.ui.AppIconDrawable;
+import com.maoqb.chuanlemei.ui.BarChartView;
+import com.maoqb.chuanlemei.ui.DonutChartView;
 import com.maoqb.chuanlemei.vision.GarmentRecognizer;
 import com.maoqb.chuanlemei.vision.ImageSignature;
 import com.maoqb.chuanlemei.vision.RecognitionCandidate;
@@ -57,35 +66,42 @@ public class MainActivity extends Activity {
     private static final int REQUEST_IMPORT_GARMENT_PHOTO = 1001;
     private static final int REQUEST_CAPTURE_WEAR = 1002;
 
-    private static final String TAB_RECORD = "record";
+    private static final String TAB_HOME = "home";
     private static final String TAB_WARDROBE = "wardrobe";
     private static final String TAB_OUTFITS = "outfits";
     private static final String TAB_STATS = "stats";
 
-    private static final int PAPER = 0xfff7f4ee;
-    private static final int INK = 0xff1e2523;
-    private static final int MUTED = 0xff6d665f;
-    private static final int LINE = 0xffded4c8;
-    private static final int CARD = 0xfffffbf6;
-    private static final int PINE = 0xff263b37;
-    private static final int CLAY = 0xffb8653c;
-    private static final int GREEN_TINT = 0xffedf8f1;
-    private static final int WARNING_TINT = 0xfffff0e8;
+    private static final int BACKGROUND = 0xfff4f6f5;
+    private static final int CARD = 0xffffffff;
+    private static final int FIELD = 0xfff8faf9;
+    private static final int INK = 0xff17201d;
+    private static final int MUTED = 0xff6e7773;
+    private static final int LINE = 0xffe1e7e4;
+    private static final int GREEN = 0xff167d5a;
+    private static final int GREEN_DARK = 0xff0f5d43;
+    private static final int GREEN_TINT = 0xffe7f3ee;
+    private static final int BLUE = 0xff4d7fa8;
+    private static final int ORANGE = 0xffdf8241;
+    private static final int ORANGE_TINT = 0xfffff2e9;
+    private static final int DANGER = 0xffb64848;
 
     private WardrobeDatabase database;
+    private LinearLayout headerContainer;
     private LinearLayout content;
-    private TextView statusText;
+    private LinearLayout bottomNavigation;
+    private ScrollView scrollView;
+    private Dialog garmentDialog;
 
     private List<Garment> garments = new ArrayList<>();
     private List<WearRecord> records = new ArrayList<>();
-    private String currentTab = TAB_RECORD;
-    private String statusMessage = "正在读取本地数据";
+    private String currentTab = TAB_HOME;
+    private String lastRenderedTab;
 
     private String draftName = "";
     private String draftCategory = Category.TOP;
     private String draftBrand = "";
     private String draftNote = "";
-    private String draftColor = "#2F6F73";
+    private String draftColor = "#167D5A";
     private String draftPhotoPath;
     private ImageSignature draftSignature;
     private String wardrobeFilter = "all";
@@ -105,6 +121,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        configureWindow();
         database = new WardrobeDatabase(this);
         reloadData();
         buildShell();
@@ -115,7 +132,11 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (resultCode != RESULT_OK) {
-            setStatus("操作已取消");
+            if (requestCode == REQUEST_CAPTURE_WEAR && pendingCaptureUri != null) {
+                getContentResolver().delete(pendingCaptureUri, null, null);
+                pendingCaptureUri = null;
+            }
+            showMessage("操作已取消");
             return;
         }
 
@@ -124,25 +145,41 @@ public class MainActivity extends Activity {
                 handleImportedGarmentPhoto(data.getData());
             } else if (requestCode == REQUEST_CAPTURE_WEAR && pendingCaptureUri != null) {
                 handleCapturedWearPhoto(pendingCaptureUri);
+                pendingCaptureUri = null;
             }
         } catch (Exception error) {
-            setStatus(error.getMessage() == null ? "图片处理失败" : error.getMessage());
+            showMessage(error.getMessage() == null ? "图片处理失败" : error.getMessage());
         }
     }
 
+    private void configureWindow() {
+        Window window = getWindow();
+        window.setStatusBarColor(CARD);
+        window.setNavigationBarColor(CARD);
+        window.setNavigationBarDividerColor(LINE);
+        window.getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+    }
+
     private void buildShell() {
-        LinearLayout shell = new LinearLayout(this);
-        shell.setOrientation(LinearLayout.VERTICAL);
-        shell.setBackgroundColor(PAPER);
+        LinearLayout shell = vertical();
+        shell.setBackgroundColor(BACKGROUND);
+        shell.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(0, insets.getSystemWindowInsetTop(), 0, insets.getSystemWindowInsetBottom());
+            return insets;
+        });
 
-        shell.addView(buildHeader());
-        shell.addView(buildTabs());
-        shell.addView(buildStatus());
+        headerContainer = vertical();
+        shell.addView(headerContainer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(68)
+        ));
 
-        ScrollView scrollView = new ScrollView(this);
-        scrollView.setFillViewport(false);
+        scrollView = new ScrollView(this);
+        scrollView.setFillViewport(true);
+        scrollView.setClipToPadding(false);
+        scrollView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         content = vertical();
-        content.setPadding(dp(16), dp(16), dp(16), dp(28));
+        content.setPadding(dp(16), dp(12), dp(16), dp(28));
         scrollView.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -153,67 +190,23 @@ public class MainActivity extends Activity {
                 1
         ));
 
+        bottomNavigation = horizontal();
+        bottomNavigation.setBackgroundColor(CARD);
+        bottomNavigation.setElevation(dp(10));
+        shell.addView(bottomNavigation, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(66)
+        ));
         setContentView(shell);
     }
 
-    private View buildHeader() {
-        LinearLayout header = horizontal();
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(16), dp(18), dp(16), dp(14));
-        header.setBackgroundColor(PINE);
-
-        TextView mark = text("穿", 22, 0xfff7f4ee, Typeface.BOLD);
-        mark.setGravity(Gravity.CENTER);
-        mark.setBackground(rounded(0x22ffffff, 0x66f7f4ee, dp(8)));
-        header.addView(mark, new LinearLayout.LayoutParams(dp(48), dp(48)));
-
-        LinearLayout titleBlock = vertical();
-        titleBlock.setPadding(dp(12), 0, 0, 0);
-        TextView title = text("穿了没", 24, 0xffffffff, Typeface.BOLD);
-        TextView subtitle = text("Android 原生 · 相机拍照记录衣物穿着次数", 13, 0xffd8e5dc, Typeface.NORMAL);
-        titleBlock.addView(title);
-        titleBlock.addView(subtitle);
-        header.addView(titleBlock, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        return header;
-    }
-
-    private View buildTabs() {
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setBackgroundColor(PAPER);
-        LinearLayout tabs = horizontal();
-        tabs.setPadding(dp(12), dp(12), dp(12), dp(4));
-        tabs.addView(tabButton("记录", TAB_RECORD));
-        tabs.addView(tabButton("衣橱", TAB_WARDROBE));
-        tabs.addView(tabButton("组合", TAB_OUTFITS));
-        tabs.addView(tabButton("统计", TAB_STATS));
-        scroll.addView(tabs);
-        return scroll;
-    }
-
-    private View buildStatus() {
-        LinearLayout wrapper = vertical();
-        wrapper.setPadding(dp(16), dp(8), dp(16), 0);
-        statusText = text(statusMessage, 13, MUTED, Typeface.NORMAL);
-        statusText.setPadding(dp(12), dp(10), dp(12), dp(10));
-        statusText.setBackground(rounded(CARD, LINE, dp(8)));
-        wrapper.addView(statusText, matchWrap());
-        return wrapper;
-    }
-
-    private Button tabButton(String label, String tab) {
-        Button button = button(label, tab.equals(currentTab));
-        button.setMinWidth(dp(82));
-        button.setOnClickListener(view -> {
-            currentTab = tab;
-            render();
-        });
-        return button;
-    }
-
     private void render() {
-        statusText.setText(statusMessage);
+        headerContainer.removeAllViews();
+        headerContainer.addView(buildAppBar(), matchWrap());
+        bottomNavigation.removeAllViews();
+        buildBottomNavigation();
         content.removeAllViews();
+
         if (TAB_WARDROBE.equals(currentTab)) {
             renderWardrobe();
         } else if (TAB_OUTFITS.equals(currentTab)) {
@@ -221,422 +214,893 @@ public class MainActivity extends Activity {
         } else if (TAB_STATS.equals(currentTab)) {
             renderStats();
         } else {
-            renderRecord();
+            renderHome();
+        }
+
+        if (!currentTab.equals(lastRenderedTab)) {
+            scrollView.post(() -> scrollView.scrollTo(0, 0));
+            lastRenderedTab = currentTab;
         }
     }
 
-    private void renderRecord() {
-        addTitle(content, "Capture", "今日拍照记录");
+    private View buildAppBar() {
+        LinearLayout bar = horizontal();
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(16), dp(8), dp(12), dp(8));
+        bar.setBackgroundColor(CARD);
 
-        LinearLayout cameraCard = card();
-        LinearLayout dateRow = horizontal();
-        dateRow.setGravity(Gravity.CENTER_VERTICAL);
-        dateRow.addView(labelBlock("记录日期", recordDate), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        Button dateButton = button("选择日期", false);
-        dateButton.setOnClickListener(view -> showDatePicker(recordDate, value -> {
-            recordDate = value;
-            render();
-        }));
-        dateRow.addView(dateButton);
-        cameraCard.addView(dateRow);
-
-        TextView dateStatus = text(DateTools.isToday(recordDate) ? "日期校验通过：本地当天" : "日期不是本地当天，禁止保存", 13,
-                DateTools.isToday(recordDate) ? 0xff285d47 : 0xff8d3f24, Typeface.BOLD);
-        dateStatus.setPadding(dp(12), dp(10), dp(12), dp(10));
-        dateStatus.setBackground(rounded(DateTools.isToday(recordDate) ? GREEN_TINT : WARNING_TINT, LINE, dp(8)));
-        addWithTop(cameraCard, dateStatus, dp(10));
-
-        Button capture = button("调用相机拍照并识别", true);
-        capture.setOnClickListener(view -> launchWearCamera());
-        addWithTop(cameraCard, capture, dp(12));
-
-        if (recordPhotoPath != null) {
-            addWithTop(cameraCard, image(recordPhotoPath, 220), dp(12));
+        if (TAB_HOME.equals(currentTab)) {
+            TextView mark = text("穿", 17, Color.WHITE, Typeface.BOLD);
+            mark.setGravity(Gravity.CENTER);
+            mark.setBackground(rounded(GREEN, GREEN, dp(8)));
+            bar.addView(mark, new LinearLayout.LayoutParams(dp(38), dp(38)));
         }
 
-        content.addView(cameraCard);
+        LinearLayout titles = vertical();
+        titles.setPadding(TAB_HOME.equals(currentTab) ? dp(10) : dp(2), 0, 0, 0);
+        titles.addView(text(appBarTitle(), 20, INK, Typeface.BOLD));
+        titles.addView(text(appBarSubtitle(), 11, MUTED, Typeface.NORMAL));
+        bar.addView(titles, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        LinearLayout recognitionCard = card();
-        TextView recognitionTitle = text("识别结果确认", 18, INK, Typeface.BOLD);
-        recognitionCard.addView(recognitionTitle);
+        if (TAB_WARDROBE.equals(currentTab)) {
+            TextView add = iconButton(AppIconDrawable.PLUS, "添加衣物", GREEN);
+            add.setOnClickListener(view -> showGarmentDialog());
+            bar.addView(add);
+        } else if (TAB_HOME.equals(currentTab)) {
+            TextView camera = iconButton(AppIconDrawable.CAMERA, "拍照记录", GREEN);
+            camera.setOnClickListener(view -> launchWearCamera());
+            bar.addView(camera);
+        }
+        return bar;
+    }
+
+    private String appBarTitle() {
+        if (TAB_WARDROBE.equals(currentTab)) {
+            return "我的衣橱";
+        }
+        if (TAB_OUTFITS.equals(currentTab)) {
+            return "搭配";
+        }
+        if (TAB_STATS.equals(currentTab)) {
+            return "穿着统计";
+        }
+        return "穿了没";
+    }
+
+    private String appBarSubtitle() {
+        if (TAB_WARDROBE.equals(currentTab)) {
+            return activeGarments().size() + " 件在用衣物";
+        }
+        if (TAB_OUTFITS.equals(currentTab)) {
+            return "上衣、裤子和鞋";
+        }
+        if (TAB_STATS.equals(currentTab)) {
+            return "看见衣橱的真实使用率";
+        }
+        return DateTools.readable(DateTools.today());
+    }
+
+    private void buildBottomNavigation() {
+        bottomNavigation.addView(navigationItem("首页", TAB_HOME, AppIconDrawable.HOME), weightedWrap());
+        bottomNavigation.addView(navigationItem("衣橱", TAB_WARDROBE, AppIconDrawable.WARDROBE), weightedWrap());
+        bottomNavigation.addView(navigationItem("搭配", TAB_OUTFITS, AppIconDrawable.OUTFIT), weightedWrap());
+        bottomNavigation.addView(navigationItem("统计", TAB_STATS, AppIconDrawable.STATS), weightedWrap());
+    }
+
+    private View navigationItem(String label, String tab, String icon) {
+        boolean selected = tab.equals(currentTab);
+        int color = selected ? GREEN : 0xff8a938f;
+        LinearLayout item = vertical();
+        item.setGravity(Gravity.CENTER);
+        item.setClickable(true);
+        item.setFocusable(true);
+        item.setContentDescription(label);
+
+        ImageView iconView = new ImageView(this);
+        iconView.setImageDrawable(icon(icon, color, 23));
+        item.addView(iconView, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        TextView title = text(label, 11, color, selected ? Typeface.BOLD : Typeface.NORMAL);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        titleParams.topMargin = dp(3);
+        item.addView(title, titleParams);
+        item.setOnClickListener(view -> {
+            if (!tab.equals(currentTab)) {
+                currentTab = tab;
+                render();
+            }
+        });
+        return item;
+    }
+
+    private void renderHome() {
+        content.addView(homeHero(), matchWrap());
+
+        if (activeGarments().isEmpty()) {
+            TextView setup = actionBanner("衣橱还是空的，先添加衣物才能进行自动识别", "去添加");
+            setup.setOnClickListener(view -> {
+                currentTab = TAB_WARDROBE;
+                render();
+                showGarmentDialog();
+            });
+            addWithTop(content, setup, dp(10));
+        }
+
+        if (recordPhotoPath != null) {
+            addWithTop(content, buildRecognitionPanel(), dp(18));
+        }
+
+        StatsCalculator.DashboardStats thirtyDays = StatsCalculator.build(
+                garments,
+                records,
+                DateTools.rangeForPreset(DateTools.PERIOD_30_DAYS, customStart, customEnd)
+        );
+        LinearLayout metrics = horizontal();
+        metrics.addView(homeMetric(String.valueOf(activeGarments().size()), "衣橱", "件"), weightedWrap());
+        metrics.addView(homeMetric(String.valueOf(thirtyDays.totalRecords), "近30天", "次"), weightedWrapWithMargins(dp(8)));
+        metrics.addView(homeMetric(String.valueOf(records.size()), "累计记录", "次"), weightedWrap());
+        addWithTop(content, metrics, dp(18));
+
+        addWithTop(content, sectionHeader("最近穿着", records.isEmpty() ? "还没有记录" : "最近 " + Math.min(5, records.size()) + " 条"), dp(24));
+        if (records.isEmpty()) {
+            addWithTop(content, emptyState(AppIconDrawable.CALENDAR, "从今天开始记录", "每次穿着必须拍照，记录会显示在这里"), dp(10));
+        } else {
+            int limit = Math.min(5, records.size());
+            for (int index = 0; index < limit; index++) {
+                addWithTop(content, recordRow(records.get(index)), dp(8));
+            }
+        }
+    }
+
+    private View homeHero() {
+        LinearLayout hero = vertical();
+        hero.setPadding(dp(18), dp(18), dp(18), dp(18));
+        hero.setBackground(rounded(GREEN_DARK, GREEN_DARK, dp(8)));
+        hero.setElevation(dp(2));
+
+        TextView date = text("今天  " + DateTools.readable(DateTools.today()), 12, 0xffd8eee5, Typeface.BOLD);
+        date.setCompoundDrawablePadding(dp(6));
+        date.setCompoundDrawablesWithIntrinsicBounds(icon(AppIconDrawable.CHECK, 0xffd8eee5, 15), null, null, null);
+        hero.addView(date);
+        addWithTop(hero, text(recordPhotoPath == null ? "今天穿了什么？" : "照片已拍好", 23, Color.WHITE, Typeface.BOLD), dp(10));
+        addWithTop(hero, text(
+                recordPhotoPath == null ? "拍照识别今天的上衣、裤子和鞋" : "确认识别结果后保存本次穿着",
+                13,
+                0xffd8eee5,
+                Typeface.NORMAL
+        ), dp(4));
+
+        ActionButton capture = actionButton(
+                recordPhotoPath == null ? "拍照并自动识别" : "重新拍照",
+                false,
+                AppIconDrawable.CAMERA
+        );
+        capture.setTextColor(GREEN_DARK);
+        capture.setBackground(rounded(Color.WHITE, Color.WHITE, dp(8)));
+        capture.setOnClickListener(view -> launchWearCamera());
+        addWithTop(hero, capture, dp(16));
+        return hero;
+    }
+
+    private View buildRecognitionPanel() {
+        LinearLayout panel = vertical();
+        panel.addView(sectionHeader("确认识别结果", "日期和衣物确认无误后保存"));
+
+        ImageView photo = image(recordPhotoPath, 196);
+        addWithTop(panel, photo, dp(10));
+
+        boolean today = DateTools.isToday(recordDate);
+        TextView verified = text(
+                today ? "已校验为本地当天 · " + recordDate : "日期已变化，请重新拍照",
+                12,
+                today ? GREEN : DANGER,
+                Typeface.BOLD
+        );
+        verified.setGravity(Gravity.CENTER_VERTICAL);
+        verified.setPadding(dp(12), dp(9), dp(12), dp(9));
+        verified.setCompoundDrawablePadding(dp(6));
+        verified.setCompoundDrawablesWithIntrinsicBounds(icon(today ? AppIconDrawable.CHECK : AppIconDrawable.CALENDAR,
+                today ? GREEN : DANGER, 16), null, null, null);
+        verified.setBackground(rounded(today ? GREEN_TINT : ORANGE_TINT, today ? GREEN_TINT : ORANGE_TINT, dp(8)));
+        addWithTop(panel, verified, dp(8));
 
         if (recognitionSlots.isEmpty()) {
-            addWithTop(recognitionCard, muted("拍照后会按上衣、裤子、鞋生成候选。"), dp(8));
+            addWithTop(panel, emptyState(AppIconDrawable.WARDROBE, "没有识别候选", "先在衣橱中导入衣物照片"), dp(10));
         } else {
             for (RecognitionSlot slot : recognitionSlots) {
-                addWithTop(recognitionCard, recognitionSlotView(slot), dp(10));
+                addWithTop(panel, recognitionSlotView(slot), dp(8));
             }
         }
 
-        EditText note = editText("备注，可选", recordNote, value -> recordNote = value);
+        addWithTop(panel, fieldLabel("备注"), dp(14));
+        EditText note = editText("例如：通勤、运动", recordNote, value -> recordNote = value);
         note.setMinLines(2);
         note.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        addWithTop(recognitionCard, note, dp(12));
+        addWithTop(panel, note, dp(6));
 
-        Button save = button("保存今日穿着", true);
+        ActionButton save = actionButton("保存今日穿着", true, AppIconDrawable.CHECK);
         save.setEnabled(canSaveWearRecord());
+        save.setAlpha(save.isEnabled() ? 1f : 0.42f);
         save.setOnClickListener(view -> saveWearRecord());
-        addWithTop(recognitionCard, save, dp(12));
-        content.addView(recognitionCard);
-
-        renderRecentRecords();
+        addWithTop(panel, save, dp(12));
+        return panel;
     }
 
     private View recognitionSlotView(RecognitionSlot slot) {
-        LinearLayout box = vertical();
-        box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        box.setBackground(rounded(0xfffffaf4, LINE, dp(8)));
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(10), dp(10));
+        row.setBackground(rounded(CARD, LINE, dp(8)));
+        row.setElevation(dp(1));
 
-        TextView title = text(
-                Category.label(slot.category) + " · " + Math.round(slot.confidence * 100) + "%",
-                15,
-                INK,
-                Typeface.BOLD
-        );
-        box.addView(title);
+        TextView category = text(Category.label(slot.category).substring(0, 1), 16, Color.WHITE, Typeface.BOLD);
+        category.setGravity(Gravity.CENTER);
+        category.setBackground(circle(Category.accentColor(slot.category), Category.accentColor(slot.category)));
+        row.addView(category, new LinearLayout.LayoutParams(dp(38), dp(38)));
+
+        LinearLayout labels = vertical();
+        labels.setPadding(dp(10), 0, dp(8), 0);
+        labels.addView(text(Category.label(slot.category), 14, INK, Typeface.BOLD));
+        labels.addView(text(slot.selectedGarmentId == null ? "请选择匹配衣物" : "识别可信度 " + Math.round(slot.confidence * 100) + "%",
+                11, MUTED, Typeface.NORMAL));
+        row.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
         Spinner spinner = garmentSpinner(slot.category, slot.selectedGarmentId, selected -> {
+            if (same(selected, slot.selectedGarmentId)) {
+                return;
+            }
             slot.selectedGarmentId = selected;
             slot.confidence = selected == null ? 0 : confidenceFor(slot, selected);
             render();
         });
-        addWithTop(box, spinner, dp(8));
-
-        if (!slot.alternatives.isEmpty()) {
-            LinearLayout candidates = vertical();
-            for (RecognitionCandidate candidate : slot.alternatives) {
-                Button candidateButton = button(
-                        candidate.garmentName + " " + Math.round(candidate.confidence * 100) + "%",
-                        false
-                );
-                candidateButton.setOnClickListener(view -> {
-                    slot.selectedGarmentId = candidate.garmentId;
-                    slot.confidence = candidate.confidence;
-                    render();
-                });
-                addWithTop(candidates, candidateButton, dp(6));
-            }
-            addWithTop(box, candidates, dp(6));
-        }
-        return box;
+        row.addView(spinner, new LinearLayout.LayoutParams(dp(132), dp(46)));
+        return row;
     }
 
-    private void renderRecentRecords() {
-        LinearLayout recent = card();
-        recent.addView(text("最近记录", 18, INK, Typeface.BOLD));
-        if (records.isEmpty()) {
-            addWithTop(recent, empty("暂无记录，拍照保存后会显示。"), dp(8));
-        } else {
-            int limit = Math.min(5, records.size());
-            for (int index = 0; index < limit; index++) {
-                WearRecord record = records.get(index);
-                addWithTop(recent, recordRow(record), dp(10));
-            }
-        }
-        content.addView(recent);
+    private View homeMetric(String value, String label, String unit) {
+        LinearLayout box = vertical();
+        box.setGravity(Gravity.CENTER);
+        box.setPadding(dp(6), dp(12), dp(6), dp(12));
+        box.setBackground(rounded(CARD, LINE, dp(8)));
+        box.setElevation(dp(1));
+        LinearLayout number = horizontal();
+        number.setGravity(Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        number.addView(text(value, 23, INK, Typeface.BOLD));
+        TextView unitView = text(unit, 10, MUTED, Typeface.NORMAL);
+        unitView.setPadding(dp(2), 0, 0, dp(3));
+        number.addView(unitView);
+        box.addView(number);
+        box.addView(text(label, 11, MUTED, Typeface.NORMAL));
+        return box;
     }
 
     private View recordRow(WearRecord record) {
         LinearLayout row = horizontal();
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(8), dp(8), dp(8));
-        row.setBackground(rounded(0xffffffff, LINE, dp(8)));
-        row.addView(image(record.photoPath, 56), new LinearLayout.LayoutParams(dp(56), dp(56)));
+        row.setPadding(dp(8), dp(8), dp(6), dp(8));
+        row.setBackground(rounded(CARD, LINE, dp(8)));
+        row.setElevation(dp(1));
+        ImageView photo = image(record.photoPath, 60);
+        row.addView(photo, new LinearLayout.LayoutParams(dp(60), dp(60)));
 
         LinearLayout info = vertical();
-        info.setPadding(dp(10), 0, dp(8), 0);
-        info.addView(text(DateTools.readable(record.wornAt), 15, INK, Typeface.BOLD));
-        info.addView(muted(recordGarmentNames(record)));
+        info.setPadding(dp(10), 0, dp(4), 0);
+        info.addView(text(DateTools.readable(record.wornAt), 14, INK, Typeface.BOLD));
+        TextView names = text(recordGarmentNames(record), 12, MUTED, Typeface.NORMAL);
+        names.setMaxLines(2);
+        info.addView(names);
         row.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 
-        Button delete = button("删除", false);
+        TextView delete = iconButton(AppIconDrawable.TRASH, "删除记录", MUTED);
         delete.setOnClickListener(view -> {
             database.deleteWearRecord(record.id);
             reloadData();
-            setStatus("记录已删除");
+            showMessage("记录已删除");
+            render();
         });
         row.addView(delete);
         return row;
     }
 
     private void renderWardrobe() {
-        addTitle(content, "Wardrobe", "衣橱导入");
+        LinearLayout summary = horizontal();
+        summary.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout copy = vertical();
+        copy.addView(text(activeGarments().size() + " 件衣物", 22, INK, Typeface.BOLD));
+        copy.addView(text("建立清晰衣橱，识别会更准确", 12, MUTED, Typeface.NORMAL));
+        summary.addView(copy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        ActionButton add = actionButton("添加", true, AppIconDrawable.PLUS);
+        add.setOnClickListener(view -> showGarmentDialog());
+        summary.addView(add, new LinearLayout.LayoutParams(dp(96), dp(44)));
+        content.addView(summary);
 
-        LinearLayout form = card();
-        if (draftPhotoPath != null) {
-            form.addView(image(draftPhotoPath, 220));
-        } else {
-            form.addView(empty("先选择一张衣物照片，保存时会生成识别特征。"));
-        }
+        HorizontalScrollView filters = new HorizontalScrollView(this);
+        filters.setHorizontalScrollBarEnabled(false);
+        filters.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout filterRow = horizontal();
+        filterRow.addView(filterChip("全部", "all"));
+        filterRow.addView(filterChip("上衣", Category.TOP));
+        filterRow.addView(filterChip("裤子", Category.BOTTOM));
+        filterRow.addView(filterChip("鞋", Category.SHOES));
+        filters.addView(filterRow);
+        addWithTop(content, filters, dp(18));
 
-        Button choosePhoto = button("选择衣物照片", false);
-        choosePhoto.setOnClickListener(view -> launchImageImport());
-        addWithTop(form, choosePhoto, dp(12));
-
-        addWithTop(form, editText("名称，例如 黑色衬衫", draftName, value -> draftName = value), dp(12));
-        addWithTop(form, categorySpinner(draftCategory, value -> {
-            draftCategory = value;
-            draftColor = String.format(Locale.US, "#%06X", Category.accentColor(value) & 0xffffff);
-        }), dp(12));
-        addWithTop(form, editText("主色 Hex，例如 #2F6F73", draftColor, value -> draftColor = value), dp(12));
-        addWithTop(form, editText("品牌，可选", draftBrand, value -> draftBrand = value), dp(12));
-        EditText note = editText("备注，可选", draftNote, value -> draftNote = value);
-        note.setMinLines(2);
-        addWithTop(form, note, dp(12));
-
-        Button save = button("加入衣橱", true);
-        save.setOnClickListener(view -> saveGarment());
-        addWithTop(form, save, dp(12));
-        content.addView(form);
-
-        LinearLayout filters = horizontal();
-        filters.addView(filterButton("全部", "all"));
-        filters.addView(filterButton("上衣", Category.TOP));
-        filters.addView(filterButton("裤子", Category.BOTTOM));
-        filters.addView(filterButton("鞋", Category.SHOES));
-        addWithTop(content, filters, dp(12));
-
-        LinearLayout list = card();
-        list.addView(text("衣物列表", 18, INK, Typeface.BOLD));
         List<Garment> visible = visibleGarments();
         if (visible.isEmpty()) {
-            addWithTop(list, empty("还没有衣物，先导入照片。"), dp(8));
-        } else {
-            for (Garment garment : visible) {
-                addWithTop(list, garmentRow(garment), dp(10));
-            }
-        }
-        content.addView(list);
-        renderSelectedGarmentDetail();
-    }
-
-    private Button filterButton(String label, String filter) {
-        Button button = button(label, filter.equals(wardrobeFilter));
-        button.setOnClickListener(view -> {
-            wardrobeFilter = filter;
-            render();
-        });
-        return button;
-    }
-
-    private View garmentRow(Garment garment) {
-        LinearLayout row = horizontal();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(8), dp(8), dp(8));
-        row.setBackground(rounded(0xffffffff, selectedGarmentId != null && selectedGarmentId.equals(garment.id) ? 0xff668d7d : LINE, dp(8)));
-        row.setOnClickListener(view -> {
-            selectedGarmentId = garment.id;
-            render();
-        });
-        row.addView(image(garment.photoPath, 60), new LinearLayout.LayoutParams(dp(60), dp(60)));
-
-        LinearLayout info = vertical();
-        info.setPadding(dp(10), 0, dp(8), 0);
-        info.addView(text(garment.name, 16, INK, Typeface.BOLD));
-        info.addView(muted(Category.label(garment.category) + " · 穿过 " + StatsCalculator.countForGarment(records, garment.id) + " 次"));
-        if (garment.brand != null && !garment.brand.isEmpty()) {
-            info.addView(muted(garment.brand));
-        }
-        row.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-        Button archive = button("停用", false);
-        archive.setOnClickListener(view -> {
-            database.saveGarment(garment.archived(DateTools.nowIsoSecond()));
-            reloadData();
-            setStatus(garment.name + " 已停用");
-        });
-        row.addView(archive);
-        return row;
-    }
-
-    private void renderOutfits() {
-        addTitle(content, "Outfits", "上衣、裤子和鞋组合");
-
-        LinearLayout composer = card();
-        for (String category : Category.ORDER) {
-            String effectiveId = effectiveComboId(category);
-            TextView label = text(Category.label(category), 15, INK, Typeface.BOLD);
-            addWithTop(composer, label, dp(8));
-            Spinner spinner = garmentSpinner(category, effectiveId, selected -> {
-                if (selected == null) {
-                    comboSelection.remove(category);
-                } else {
-                    comboSelection.put(category, selected);
-                }
-                render();
-            });
-            addWithTop(composer, spinner, dp(6));
-            Garment garment = garmentById(effectiveId);
-            if (garment != null) {
-                addWithTop(composer, image(garment.photoPath, category.equals(Category.SHOES) ? 120 : 180), dp(8));
-            } else {
-                addWithTop(composer, empty("未选择" + Category.label(category)), dp(8));
-            }
-        }
-        TextView summary = text(describeCombo(), 14, 0xff285d47, Typeface.BOLD);
-        summary.setPadding(dp(12), dp(10), dp(12), dp(10));
-        summary.setBackground(rounded(GREEN_TINT, LINE, dp(8)));
-        addWithTop(composer, summary, dp(12));
-        content.addView(composer);
-
-        LinearLayout outfitStats = card();
-        outfitStats.addView(text("周期内常穿组合", 18, INK, Typeface.BOLD));
-        StatsCalculator.DashboardStats stats = currentStats();
-        if (stats.outfitStats.isEmpty()) {
-            addWithTop(outfitStats, empty("保存穿着记录后自动统计组合。"), dp(8));
-        } else {
-            int limit = Math.min(6, stats.outfitStats.size());
-            for (int index = 0; index < limit; index++) {
-                StatsCalculator.OutfitStat stat = stats.outfitStats.get(index);
-                addWithTop(outfitStats, outfitStatRow(stat), dp(10));
-            }
-        }
-        content.addView(outfitStats);
-    }
-
-    private View outfitStatRow(StatsCalculator.OutfitStat stat) {
-        LinearLayout row = vertical();
-        row.setPadding(dp(10), dp(10), dp(10), dp(10));
-        row.setBackground(rounded(0xffffffff, LINE, dp(8)));
-        row.addView(text(outfitNames(stat.topId, stat.bottomId, stat.shoesId), 15, INK, Typeface.BOLD));
-        row.addView(muted("穿过 " + stat.count + " 次 · 最近 " + (stat.lastWornAt == null ? "-" : DateTools.readable(stat.lastWornAt))));
-        LinearLayout photos = horizontal();
-        addOutfitImage(photos, stat.topId);
-        addOutfitImage(photos, stat.bottomId);
-        addOutfitImage(photos, stat.shoesId);
-        addWithTop(row, photos, dp(8));
-        return row;
-    }
-
-    private void renderStats() {
-        addTitle(content, "Analytics", "历史周期数据");
-
-        LinearLayout period = card();
-        period.addView(text("统计周期", 18, INK, Typeface.BOLD));
-        Spinner spinner = periodSpinner();
-        addWithTop(period, spinner, dp(10));
-        if (DateTools.PERIOD_CUSTOM.equals(periodPreset)) {
-            Button start = button("开始 " + customStart, false);
-            start.setOnClickListener(view -> showDatePicker(customStart, value -> {
-                customStart = value;
-                render();
-            }));
-            addWithTop(period, start, dp(8));
-            Button end = button("结束 " + customEnd, false);
-            end.setOnClickListener(view -> showDatePicker(customEnd, value -> {
-                customEnd = value;
-                render();
-            }));
-            addWithTop(period, end, dp(8));
-        }
-        PeriodRange range = currentRange();
-        period.addView(muted(range.start + " 至 " + range.end));
-        content.addView(period);
-
-        StatsCalculator.DashboardStats stats = StatsCalculator.build(garments, records, range);
-        LinearLayout metrics = card();
-        metrics.addView(metric("穿着记录", stats.totalRecords, "周期内记录数"));
-        metrics.addView(metric("衣物计次", stats.totalGarmentWears, "上衣、裤子、鞋分别计数"));
-        metrics.addView(metric("活跃衣物", stats.activeGarments, "未停用衣物"));
-        content.addView(metrics);
-
-        LinearLayout categories = card();
-        categories.addView(text("分类计次", 18, INK, Typeface.BOLD));
-        for (String category : Category.ORDER) {
-            addWithTop(categories, muted(Category.label(category) + ": " + stats.categoryCounts.get(category) + " 次"), dp(6));
-        }
-        content.addView(categories);
-
-        LinearLayout days = card();
-        days.addView(text("日历趋势", 18, INK, Typeface.BOLD));
-        List<StatsCalculator.DailyCount> dailyCounts = stats.dailyCounts;
-        int start = Math.max(0, dailyCounts.size() - 30);
-        for (int index = start; index < dailyCounts.size(); index++) {
-            StatsCalculator.DailyCount day = dailyCounts.get(index);
-            addWithTop(days, muted(DateTools.shortDate(day.date) + "  " + bar(day.count) + " " + day.count), dp(4));
-        }
-        content.addView(days);
-
-        LinearLayout ranking = card();
-        ranking.addView(text("衣物排行", 18, INK, Typeface.BOLD));
-        if (stats.garmentStats.isEmpty()) {
-            addWithTop(ranking, empty("暂无衣物数据。"), dp(8));
-        } else {
-            int limit = Math.min(10, stats.garmentStats.size());
-            for (int index = 0; index < limit; index++) {
-                StatsCalculator.GarmentStat stat = stats.garmentStats.get(index);
-                addWithTop(ranking, garmentStatRow(stat), dp(8));
-            }
-        }
-        content.addView(ranking);
-        renderSelectedGarmentDetail();
-    }
-
-    private View metric(String label, int value, String detail) {
-        LinearLayout box = vertical();
-        box.setPadding(dp(12), dp(12), dp(12), dp(12));
-        box.setBackground(rounded(0xfffffaf4, LINE, dp(8)));
-        box.addView(muted(label));
-        box.addView(text(String.valueOf(value), 28, INK, Typeface.BOLD));
-        box.addView(muted(detail));
-        LinearLayout.LayoutParams params = matchWrap();
-        params.setMargins(0, 0, 0, dp(8));
-        box.setLayoutParams(params);
-        return box;
-    }
-
-    private View garmentStatRow(StatsCalculator.GarmentStat stat) {
-        LinearLayout row = horizontal();
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(8), dp(8), dp(8), dp(8));
-        row.setBackground(rounded(0xffffffff, LINE, dp(8)));
-        row.setOnClickListener(view -> {
-            selectedGarmentId = stat.garment.id;
-            render();
-        });
-        row.addView(image(stat.garment.photoPath, 52), new LinearLayout.LayoutParams(dp(52), dp(52)));
-        LinearLayout info = vertical();
-        info.setPadding(dp(10), 0, 0, 0);
-        info.addView(text(stat.garment.name, 15, INK, Typeface.BOLD));
-        info.addView(muted("本期 " + stat.rangeCount + " 次 · 总计 " + stat.totalCount + " 次"));
-        row.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        TextView count = text(String.valueOf(stat.rangeCount), 22, INK, Typeface.BOLD);
-        row.addView(count);
-        return row;
-    }
-
-    private void renderSelectedGarmentDetail() {
-        Garment selected = selectedGarment();
-        LinearLayout detail = card();
-        detail.addView(text("单件衣物数据", 18, INK, Typeface.BOLD));
-        if (selected == null) {
-            addWithTop(detail, empty("选择一件衣物查看明细。"), dp(8));
-            content.addView(detail);
+            View empty = emptyState(AppIconDrawable.WARDROBE, "这个分类还没有衣物", "点击添加，导入一张清晰的衣物照片");
+            empty.setOnClickListener(view -> showGarmentDialog());
+            addWithTop(content, empty, dp(14));
             return;
         }
 
-        LinearLayout hero = horizontal();
-        hero.setGravity(Gravity.CENTER_VERTICAL);
-        hero.addView(image(selected.photoPath, 72), new LinearLayout.LayoutParams(dp(72), dp(72)));
-        LinearLayout info = vertical();
-        info.setPadding(dp(12), 0, 0, 0);
-        info.addView(text(selected.name, 17, INK, Typeface.BOLD));
-        info.addView(muted(Category.label(selected.category) + " · " + (selected.brand == null ? "未填写品牌" : selected.brand)));
-        hero.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-        addWithTop(detail, hero, dp(12));
+        int screenWidth = getResources().getDisplayMetrics().widthPixels;
+        int columns = getResources().getConfiguration().screenWidthDp >= 600 ? 3 : 2;
+        int gap = dp(10);
+        int tileWidth = (screenWidth - dp(32) - gap * (columns - 1)) / columns;
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(columns);
+        for (int index = 0; index < visible.size(); index++) {
+            Garment garment = visible.get(index);
+            View tile = garmentTile(garment, tileWidth);
+            GridLayout.LayoutParams params = new GridLayout.LayoutParams();
+            params.width = tileWidth;
+            params.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+            params.setMargins(index % columns == 0 ? 0 : gap, dp(10), 0, 0);
+            grid.addView(tile, params);
+        }
+        addWithTop(content, grid, dp(4));
+    }
 
-        List<WearRecord> garmentRecords = StatsCalculator.recordsForGarment(records, selected.id);
-        addWithTop(detail, text("总次数 " + garmentRecords.size(), 22, INK, Typeface.BOLD), dp(12));
+    private View filterChip(String label, String filter) {
+        boolean selected = filter.equals(wardrobeFilter);
+        TextView chip = text(label, 13, selected ? Color.WHITE : MUTED, selected ? Typeface.BOLD : Typeface.NORMAL);
+        chip.setGravity(Gravity.CENTER);
+        chip.setMinWidth(dp(72));
+        chip.setPadding(dp(16), dp(9), dp(16), dp(9));
+        chip.setBackground(rounded(selected ? GREEN : CARD, selected ? GREEN : LINE, dp(18)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.rightMargin = dp(8);
+        chip.setLayoutParams(params);
+        chip.setOnClickListener(view -> {
+            wardrobeFilter = filter;
+            render();
+        });
+        return chip;
+    }
+
+    private View garmentTile(Garment garment, int width) {
+        LinearLayout tile = vertical();
+        tile.setBackground(rounded(CARD, LINE, dp(8)));
+        tile.setClipToOutline(true);
+        tile.setElevation(dp(1));
+        tile.setOnClickListener(view -> showGarmentDetail(garment));
+
+        int photoHeight = Math.min(dp(170), Math.round(width * 0.9f));
+        tile.addView(image(garment.photoPath, 150), new LinearLayout.LayoutParams(width, photoHeight));
+
+        LinearLayout info = vertical();
+        info.setPadding(dp(10), dp(9), dp(10), dp(11));
+        TextView name = text(garment.name, 14, INK, Typeface.BOLD);
+        name.setSingleLine(true);
+        info.addView(name);
+
+        LinearLayout meta = horizontal();
+        meta.setGravity(Gravity.CENTER_VERTICAL);
+        View swatch = new View(this);
+        swatch.setBackground(circle(garment.color, 0x22000000));
+        meta.addView(swatch, new LinearLayout.LayoutParams(dp(10), dp(10)));
+        TextView category = text(Category.label(garment.category), 11, MUTED, Typeface.NORMAL);
+        category.setPadding(dp(5), 0, 0, 0);
+        meta.addView(category, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        meta.addView(text(StatsCalculator.countForGarment(records, garment.id) + " 次", 12, GREEN, Typeface.BOLD));
+        addWithTop(info, meta, dp(5));
+        tile.addView(info);
+        return tile;
+    }
+
+    private void showGarmentDialog() {
+        if (garmentDialog != null && garmentDialog.isShowing()) {
+            garmentDialog.dismiss();
+        }
+        garmentDialog = new Dialog(this);
+        garmentDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        LinearLayout form = vertical();
+        form.setPadding(dp(18), dp(16), dp(18), dp(22));
+        form.setBackground(rounded(CARD, CARD, dp(8)));
+        scroll.addView(form, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
+
+        LinearLayout titleRow = horizontal();
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleCopy = vertical();
+        titleCopy.addView(text("添加衣物", 20, INK, Typeface.BOLD));
+        titleCopy.addView(text("正面照片越清晰，自动识别越准确", 11, MUTED, Typeface.NORMAL));
+        titleRow.addView(titleCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        TextView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
+        close.setOnClickListener(view -> garmentDialog.dismiss());
+        titleRow.addView(close);
+        form.addView(titleRow);
+
+        View photo;
+        if (draftPhotoPath == null) {
+            photo = emptyState(AppIconDrawable.CAMERA, "选择衣物照片", "建议单件、正面、光线均匀");
+        } else {
+            photo = image(draftPhotoPath, 176);
+        }
+        photo.setOnClickListener(view -> launchImageImport());
+        addWithTop(form, photo, dp(16));
+
+        ActionButton choose = actionButton(draftPhotoPath == null ? "从相册选择" : "更换照片", false, AppIconDrawable.CAMERA);
+        choose.setOnClickListener(view -> launchImageImport());
+        addWithTop(form, choose, dp(8));
+
+        addWithTop(form, fieldLabel("名称"), dp(16));
+        addWithTop(form, editText("例如：白色牛津纺衬衫", draftName, value -> draftName = value), dp(6));
+
+        addWithTop(form, fieldLabel("分类"), dp(14));
+        LinearLayout categories = horizontal();
+        categories.addView(categoryChoice("上衣", Category.TOP), weightedWrap());
+        categories.addView(categoryChoice("裤子", Category.BOTTOM), weightedWrapWithMargins(dp(8)));
+        categories.addView(categoryChoice("鞋", Category.SHOES), weightedWrap());
+        addWithTop(form, categories, dp(6));
+
+        addWithTop(form, fieldLabel("主色"), dp(14));
+        LinearLayout swatches = horizontal();
+        swatches.setGravity(Gravity.CENTER_VERTICAL);
+        String[] colors = {"#171B1A", "#F4F4F2", "#8A918E", "#167D5A", "#4D7FA8", "#D97850", "#8A654A"};
+        for (String color : colors) {
+            swatches.addView(colorSwatch(color));
+        }
+        addWithTop(form, swatches, dp(8));
+
+        addWithTop(form, fieldLabel("品牌"), dp(14));
+        addWithTop(form, editText("选填", draftBrand, value -> draftBrand = value), dp(6));
+        addWithTop(form, fieldLabel("备注"), dp(14));
+        EditText note = editText("版型、季节或其他信息", draftNote, value -> draftNote = value);
+        note.setMinLines(2);
+        addWithTop(form, note, dp(6));
+
+        ActionButton save = actionButton("加入衣橱", true, AppIconDrawable.PLUS);
+        save.setOnClickListener(view -> saveGarment());
+        addWithTop(form, save, dp(18));
+
+        garmentDialog.setContentView(scroll);
+        garmentDialog.setOnDismissListener(dialog -> garmentDialog = null);
+        Window window = garmentDialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.dimAmount = 0.46f;
+            window.setAttributes(params);
+        }
+        garmentDialog.show();
+        if (window != null) {
+            int width = getResources().getDisplayMetrics().widthPixels - dp(24);
+            int height = Math.round(getResources().getDisplayMetrics().heightPixels * 0.88f);
+            window.setLayout(width, height);
+            window.setGravity(Gravity.CENTER);
+        }
+    }
+
+    private View categoryChoice(String label, String category) {
+        boolean selected = category.equals(draftCategory);
+        TextView choice = text(label, 13, selected ? Color.WHITE : MUTED, selected ? Typeface.BOLD : Typeface.NORMAL);
+        choice.setGravity(Gravity.CENTER);
+        choice.setBackground(rounded(selected ? GREEN : FIELD, selected ? GREEN : LINE, dp(8)));
+        choice.setOnClickListener(view -> {
+            draftCategory = category;
+            if (draftColor == null || draftColor.isEmpty()) {
+                draftColor = String.format(Locale.US, "#%06X", Category.accentColor(category) & 0xffffff);
+            }
+            showGarmentDialog();
+        });
+        return choice;
+    }
+
+    private View colorSwatch(String hex) {
+        boolean selected = hex.equalsIgnoreCase(draftColor);
+        TextView swatch = text("", 1, Color.TRANSPARENT, Typeface.NORMAL);
+        int value = parseColor(hex, GREEN);
+        swatch.setBackground(circle(value, selected ? GREEN : LINE));
+        swatch.setContentDescription("颜色 " + hex);
+        if (selected) {
+            swatch.setCompoundDrawablesWithIntrinsicBounds(icon(AppIconDrawable.CHECK,
+                    value == 0xfff4f4f2 ? INK : Color.WHITE, 16), null, null, null);
+            swatch.setGravity(Gravity.CENTER);
+        }
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(34), dp(34));
+        params.rightMargin = dp(9);
+        swatch.setLayoutParams(params);
+        swatch.setOnClickListener(view -> {
+            draftColor = hex;
+            showGarmentDialog();
+        });
+        return swatch;
+    }
+
+    private void showGarmentDetail(Garment garment) {
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout detail = vertical();
+        detail.setPadding(dp(18), dp(16), dp(18), dp(22));
+        detail.setBackground(rounded(CARD, CARD, dp(8)));
+        scroll.addView(detail);
+
+        LinearLayout top = horizontal();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView category = text(Category.label(garment.category), 12, GREEN, Typeface.BOLD);
+        category.setPadding(dp(10), dp(5), dp(10), dp(5));
+        category.setBackground(rounded(GREEN_TINT, GREEN_TINT, dp(14)));
+        top.addView(category);
+        View spacer = new View(this);
+        top.addView(spacer, new LinearLayout.LayoutParams(0, 1, 1));
+        TextView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
+        close.setOnClickListener(view -> dialog.dismiss());
+        top.addView(close);
+        detail.addView(top);
+
+        addWithTop(detail, image(garment.photoPath, 220), dp(10));
+        addWithTop(detail, text(garment.name, 22, INK, Typeface.BOLD), dp(14));
+        String brand = garment.brand == null || garment.brand.trim().isEmpty() ? "未填写品牌" : garment.brand;
+        detail.addView(text(brand, 12, MUTED, Typeface.NORMAL));
+
+        List<WearRecord> garmentRecords = StatsCalculator.recordsForGarment(records, garment.id);
+        LinearLayout metrics = horizontal();
+        metrics.addView(detailMetric(String.valueOf(garmentRecords.size()), "累计穿着"), weightedWrap());
+        String latest = garmentRecords.isEmpty() ? "暂无" : DateTools.shortDate(garmentRecords.get(0).wornAt);
+        metrics.addView(detailMetric(latest, "最近穿着"), weightedWrapWithMargins(dp(8)));
+        addWithTop(detail, metrics, dp(14));
+
+        addWithTop(detail, sectionHeader("穿着历史", garmentRecords.isEmpty() ? "暂无记录" : "最近记录"), dp(20));
         if (garmentRecords.isEmpty()) {
-            detail.addView(muted("还没有穿着记录。"));
+            addWithTop(detail, text("还没有穿过这件衣物", 13, MUTED, Typeface.NORMAL), dp(8));
         } else {
             int limit = Math.min(6, garmentRecords.size());
             for (int index = 0; index < limit; index++) {
                 WearRecord record = garmentRecords.get(index);
-                addWithTop(detail, muted(DateTools.readable(record.wornAt) + " · " + recordGarmentNames(record)), dp(6));
+                TextView history = text(DateTools.readable(record.wornAt) + "  ·  " + recordGarmentNames(record), 12, INK, Typeface.NORMAL);
+                history.setPadding(0, dp(8), 0, dp(8));
+                detail.addView(history);
             }
         }
-        content.addView(detail);
+
+        ActionButton archive = actionButton("停用这件衣物", false, AppIconDrawable.TRASH);
+        archive.setTextColor(DANGER);
+        archive.setOnClickListener(view -> {
+            database.saveGarment(garment.archived(DateTools.nowIsoSecond()));
+            dialog.dismiss();
+            reloadData();
+            showMessage(garment.name + " 已停用");
+            render();
+        });
+        addWithTop(detail, archive, dp(18));
+
+        dialog.setContentView(scroll);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawableResource(android.R.color.transparent);
+            window.setLayout(getResources().getDisplayMetrics().widthPixels - dp(24),
+                    Math.round(getResources().getDisplayMetrics().heightPixels * 0.84f));
+            window.setGravity(Gravity.CENTER);
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.dimAmount = 0.46f;
+            window.setAttributes(params);
+        }
+    }
+
+    private View detailMetric(String value, String label) {
+        LinearLayout metric = vertical();
+        metric.setPadding(dp(12), dp(11), dp(12), dp(11));
+        metric.setBackground(rounded(FIELD, LINE, dp(8)));
+        metric.addView(text(value, 20, INK, Typeface.BOLD));
+        metric.addView(text(label, 11, MUTED, Typeface.NORMAL));
+        return metric;
+    }
+
+    private void renderOutfits() {
+        content.addView(sectionHeader("今日搭配预览", "从衣橱中选择上衣、裤子和鞋"));
+        if (activeGarments().isEmpty()) {
+            View empty = emptyState(AppIconDrawable.OUTFIT, "还不能创建搭配", "先添加衣物，再回来组合完整穿搭");
+            empty.setOnClickListener(view -> {
+                currentTab = TAB_WARDROBE;
+                render();
+                showGarmentDialog();
+            });
+            addWithTop(content, empty, dp(12));
+            return;
+        }
+
+        for (String category : Category.ORDER) {
+            addWithTop(content, outfitPiece(category), dp(10));
+        }
+
+        TextView summary = text(describeCombo(), 13, GREEN_DARK, Typeface.BOLD);
+        summary.setGravity(Gravity.CENTER_VERTICAL);
+        summary.setPadding(dp(12), dp(11), dp(12), dp(11));
+        summary.setCompoundDrawablePadding(dp(7));
+        summary.setCompoundDrawablesWithIntrinsicBounds(icon(AppIconDrawable.CHECK, GREEN, 16), null, null, null);
+        summary.setBackground(rounded(GREEN_TINT, GREEN_TINT, dp(8)));
+        addWithTop(content, summary, dp(10));
+
+        StatsCalculator.DashboardStats stats = currentStats();
+        addWithTop(content, sectionHeader("常穿组合", stats.outfitStats.isEmpty() ? "有记录后自动生成" : "当前统计周期"), dp(24));
+        if (stats.outfitStats.isEmpty()) {
+            addWithTop(content, emptyState(AppIconDrawable.CALENDAR, "暂无组合记录", "完成一次拍照记录后，这里会出现常穿搭配"), dp(10));
+        } else {
+            int limit = Math.min(5, stats.outfitStats.size());
+            for (int index = 0; index < limit; index++) {
+                addWithTop(content, outfitStatCard(stats.outfitStats.get(index)), dp(8));
+            }
+        }
+    }
+
+    private View outfitPiece(String category) {
+        String selectedId = effectiveComboId(category);
+        Garment garment = garmentById(selectedId);
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(8), dp(10), dp(8));
+        row.setBackground(rounded(CARD, LINE, dp(8)));
+        row.setElevation(dp(1));
+
+        if (garment == null) {
+            row.addView(photoPlaceholder(AppIconDrawable.WARDROBE, 94), new LinearLayout.LayoutParams(dp(94), dp(94)));
+        } else {
+            row.addView(image(garment.photoPath, 94), new LinearLayout.LayoutParams(dp(94), dp(94)));
+        }
+
+        LinearLayout controls = vertical();
+        controls.setPadding(dp(12), 0, 0, 0);
+        controls.addView(text(Category.label(category), 12, Category.accentColor(category), Typeface.BOLD));
+        controls.addView(text(garment == null ? "未选择" : garment.name, 16, INK, Typeface.BOLD));
+        Spinner spinner = garmentSpinner(category, selectedId, selected -> {
+            if (same(selected, comboSelection.get(category)) || (comboSelection.get(category) == null && same(selected, effectiveComboId(category)))) {
+                return;
+            }
+            if (selected == null) {
+                comboSelection.remove(category);
+            } else {
+                comboSelection.put(category, selected);
+            }
+            render();
+        });
+        LinearLayout.LayoutParams spinnerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(44)
+        );
+        spinnerParams.topMargin = dp(7);
+        controls.addView(spinner, spinnerParams);
+        row.addView(controls, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        return row;
+    }
+
+    private View outfitStatCard(StatsCalculator.OutfitStat stat) {
+        LinearLayout card = horizontal();
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(8), dp(8), dp(10), dp(8));
+        card.setBackground(rounded(CARD, LINE, dp(8)));
+        card.setElevation(dp(1));
+
+        LinearLayout photos = horizontal();
+        addOutfitImage(photos, stat.topId);
+        addOutfitImage(photos, stat.bottomId);
+        addOutfitImage(photos, stat.shoesId);
+        card.addView(photos, new LinearLayout.LayoutParams(dp(132), dp(50)));
+
+        LinearLayout info = vertical();
+        info.setPadding(dp(10), 0, dp(4), 0);
+        TextView names = text(outfitNames(stat.topId, stat.bottomId, stat.shoesId), 12, INK, Typeface.BOLD);
+        names.setMaxLines(2);
+        info.addView(names);
+        info.addView(text("最近 " + (stat.lastWornAt == null ? "-" : DateTools.shortDate(stat.lastWornAt)), 11, MUTED, Typeface.NORMAL));
+        card.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        card.addView(text(stat.count + " 次", 15, GREEN, Typeface.BOLD));
+        return card;
+    }
+
+    private void renderStats() {
+        HorizontalScrollView periodScroll = new HorizontalScrollView(this);
+        periodScroll.setHorizontalScrollBarEnabled(false);
+        periodScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout periods = horizontal();
+        periods.addView(periodChip("7天", DateTools.PERIOD_7_DAYS));
+        periods.addView(periodChip("30天", DateTools.PERIOD_30_DAYS));
+        periods.addView(periodChip("90天", DateTools.PERIOD_90_DAYS));
+        periods.addView(periodChip("今年", DateTools.PERIOD_YEAR));
+        periods.addView(periodChip("全部", DateTools.PERIOD_ALL));
+        periods.addView(periodChip("自定义", DateTools.PERIOD_CUSTOM));
+        periodScroll.addView(periods);
+        content.addView(periodScroll);
+
+        if (DateTools.PERIOD_CUSTOM.equals(periodPreset)) {
+            LinearLayout dates = horizontal();
+            TextView start = dateControl("开始", customStart, value -> customStart = value);
+            TextView end = dateControl("结束", customEnd, value -> customEnd = value);
+            dates.addView(start, weightedWrap());
+            dates.addView(end, weightedWrapWithMargins(dp(8)));
+            addWithTop(content, dates, dp(10));
+        }
+
+        PeriodRange range = currentRange();
+        StatsCalculator.DashboardStats stats = StatsCalculator.build(garments, records, range);
+        TextView rangeText = text(range.start + " 至 " + range.end, 11, MUTED, Typeface.NORMAL);
+        addWithTop(content, rangeText, dp(10));
+
+        LinearLayout metrics = horizontal();
+        metrics.addView(statMetric(String.valueOf(stats.totalRecords), "穿着记录", GREEN), weightedWrap());
+        metrics.addView(statMetric(String.valueOf(stats.totalGarmentWears), "衣物计次", ORANGE), weightedWrapWithMargins(dp(8)));
+        metrics.addView(statMetric(String.valueOf(stats.activeGarments), "活跃衣物", BLUE), weightedWrap());
+        addWithTop(content, metrics, dp(14));
+
+        LinearLayout trendCard = chartCard("穿着趋势", "按日期汇总记录次数");
+        BarChartView chart = new BarChartView(this, GREEN, LINE, MUTED);
+        chart.setPoints(ChartSeries.fromDailyCounts(stats.dailyCounts, 12));
+        addWithTop(trendCard, chart, dp(8), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(220)
+        ));
+        addWithTop(content, trendCard, dp(14));
+
+        LinearLayout categoryCard = chartCard("分类占比", "上衣、裤子和鞋的穿着计次");
+        LinearLayout distribution = horizontal();
+        distribution.setGravity(Gravity.CENTER_VERTICAL);
+        DonutChartView donut = new DonutChartView(this);
+        int[] values = {
+                count(stats, Category.TOP),
+                count(stats, Category.BOTTOM),
+                count(stats, Category.SHOES)
+        };
+        int[] colors = {Category.accentColor(Category.TOP), Category.accentColor(Category.BOTTOM), Category.accentColor(Category.SHOES)};
+        donut.setData(values, colors, INK, MUTED, LINE);
+        distribution.addView(donut, new LinearLayout.LayoutParams(dp(168), dp(168)));
+        LinearLayout legend = vertical();
+        legend.setPadding(dp(12), 0, 0, 0);
+        legend.addView(legendRow("上衣", values[0], colors[0]));
+        addWithTop(legend, legendRow("裤子", values[1], colors[1]), dp(12));
+        addWithTop(legend, legendRow("鞋", values[2], colors[2]), dp(12));
+        distribution.addView(legend, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        addWithTop(categoryCard, distribution, dp(8));
+        addWithTop(content, categoryCard, dp(14));
+
+        addWithTop(content, sectionHeader("衣物排行", "按本周期穿着次数排序"), dp(24));
+        if (stats.garmentStats.isEmpty()) {
+            addWithTop(content, emptyState(AppIconDrawable.STATS, "暂无排行数据", "添加衣物并完成拍照记录后即可查看"), dp(10));
+        } else {
+            int max = 1;
+            for (StatsCalculator.GarmentStat stat : stats.garmentStats) {
+                max = Math.max(max, stat.rangeCount);
+            }
+            int limit = Math.min(8, stats.garmentStats.size());
+            for (int index = 0; index < limit; index++) {
+                addWithTop(content, rankingRow(index + 1, stats.garmentStats.get(index), max), dp(8));
+            }
+        }
+    }
+
+    private View periodChip(String label, String preset) {
+        boolean selected = preset.equals(periodPreset);
+        TextView chip = text(label, 13, selected ? Color.WHITE : MUTED, selected ? Typeface.BOLD : Typeface.NORMAL);
+        chip.setGravity(Gravity.CENTER);
+        chip.setPadding(dp(15), dp(9), dp(15), dp(9));
+        chip.setBackground(rounded(selected ? GREEN : CARD, selected ? GREEN : LINE, dp(18)));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        params.rightMargin = dp(8);
+        chip.setLayoutParams(params);
+        chip.setOnClickListener(view -> {
+            periodPreset = preset;
+            render();
+        });
+        return chip;
+    }
+
+    private TextView dateControl(String label, String date, Consumer<String> consumer) {
+        TextView control = text(label + "\n" + date, 12, INK, Typeface.BOLD);
+        control.setGravity(Gravity.CENTER_VERTICAL);
+        control.setLineSpacing(dp(2), 1f);
+        control.setPadding(dp(12), dp(8), dp(12), dp(8));
+        control.setCompoundDrawablePadding(dp(8));
+        control.setCompoundDrawablesWithIntrinsicBounds(icon(AppIconDrawable.CALENDAR, GREEN, 18), null, null, null);
+        control.setBackground(rounded(CARD, LINE, dp(8)));
+        control.setOnClickListener(view -> showDatePicker(date, value -> {
+            consumer.accept(value);
+            render();
+        }));
+        return control;
+    }
+
+    private View statMetric(String value, String label, int accent) {
+        LinearLayout metric = vertical();
+        metric.setPadding(dp(10), dp(12), dp(8), dp(12));
+        metric.setBackground(rounded(CARD, LINE, dp(8)));
+        metric.setElevation(dp(1));
+        metric.addView(text(value, 22, accent, Typeface.BOLD));
+        metric.addView(text(label, 10, MUTED, Typeface.NORMAL));
+        return metric;
+    }
+
+    private LinearLayout chartCard(String title, String caption) {
+        LinearLayout card = vertical();
+        card.setPadding(dp(14), dp(14), dp(14), dp(12));
+        card.setBackground(rounded(CARD, LINE, dp(8)));
+        card.setElevation(dp(1));
+        card.addView(text(title, 16, INK, Typeface.BOLD));
+        card.addView(text(caption, 11, MUTED, Typeface.NORMAL));
+        return card;
+    }
+
+    private View legendRow(String label, int value, int color) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        View dot = new View(this);
+        dot.setBackground(circle(color, color));
+        row.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
+        TextView name = text(label, 12, MUTED, Typeface.NORMAL);
+        name.setPadding(dp(8), 0, 0, 0);
+        row.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(text(value + " 次", 13, INK, Typeface.BOLD));
+        return row;
+    }
+
+    private View rankingRow(int rank, StatsCalculator.GarmentStat stat, int max) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(9), dp(10), dp(9));
+        row.setBackground(rounded(CARD, LINE, dp(8)));
+        row.setElevation(dp(1));
+        row.setOnClickListener(view -> showGarmentDetail(stat.garment));
+
+        TextView rankView = text(String.valueOf(rank), 12, rank <= 3 ? Color.WHITE : MUTED, Typeface.BOLD);
+        rankView.setGravity(Gravity.CENTER);
+        rankView.setBackground(circle(rank <= 3 ? GREEN : FIELD, rank <= 3 ? GREEN : LINE));
+        row.addView(rankView, new LinearLayout.LayoutParams(dp(28), dp(28)));
+
+        ImageView photo = image(stat.garment.photoPath, 48);
+        LinearLayout.LayoutParams photoParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        photoParams.leftMargin = dp(8);
+        row.addView(photo, photoParams);
+
+        LinearLayout info = vertical();
+        info.setPadding(dp(10), 0, dp(10), 0);
+        LinearLayout title = horizontal();
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.addView(text(stat.garment.name, 13, INK, Typeface.BOLD), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        title.addView(text(stat.rangeCount + " 次", 13, GREEN, Typeface.BOLD));
+        info.addView(title);
+        ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(max);
+        progress.setProgress(stat.rangeCount);
+        progress.setProgressTintList(ColorStateList.valueOf(Category.accentColor(stat.garment.category)));
+        progress.setProgressBackgroundTintList(ColorStateList.valueOf(LINE));
+        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(5)
+        );
+        progressParams.topMargin = dp(7);
+        info.addView(progress, progressParams);
+        info.addView(text("累计 " + stat.totalCount + " 次", 10, MUTED, Typeface.NORMAL));
+        row.addView(info, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        return row;
+    }
+
+    private int count(StatsCalculator.DashboardStats stats, String category) {
+        Integer value = stats.categoryCounts.get(category);
+        return value == null ? 0 : value;
     }
 
     private void launchImageImport() {
@@ -646,7 +1110,7 @@ public class MainActivity extends Activity {
         try {
             startActivityForResult(intent, REQUEST_IMPORT_GARMENT_PHOTO);
         } catch (ActivityNotFoundException error) {
-            setStatus("没有可用的图片选择器");
+            showMessage("没有可用的图片选择器");
         }
     }
 
@@ -658,7 +1122,7 @@ public class MainActivity extends Activity {
             values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ChuanLeMei");
             pendingCaptureUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
             if (pendingCaptureUri == null) {
-                setStatus("无法创建相机输出文件");
+                showMessage("无法创建相机输出文件");
                 return;
             }
             Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
@@ -666,9 +1130,9 @@ public class MainActivity extends Activity {
             intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivityForResult(intent, REQUEST_CAPTURE_WEAR);
         } catch (ActivityNotFoundException error) {
-            setStatus("没有可用的相机应用");
+            showMessage("没有可用的相机应用");
         } catch (Exception error) {
-            setStatus(error.getMessage() == null ? "打开相机失败" : error.getMessage());
+            showMessage(error.getMessage() == null ? "打开相机失败" : error.getMessage());
         }
     }
 
@@ -680,7 +1144,8 @@ public class MainActivity extends Activity {
         draftPhotoPath = ImageStore.saveBitmap(this, bitmap, "garment");
         draftSignature = ImageSignature.fromBitmap(bitmap);
         bitmap.recycle();
-        setStatus("衣物照片已导入");
+        showMessage("衣物照片已导入");
+        showGarmentDialog();
     }
 
     private void handleCapturedWearPhoto(Uri uri) throws IOException {
@@ -693,17 +1158,19 @@ public class MainActivity extends Activity {
         bitmap.recycle();
         recognitionSlots = new ArrayList<>(GarmentRecognizer.recognize(signature, activeGarments()));
         recordDate = DateTools.today();
-        setStatus("拍照识别完成，请确认衣物");
+        currentTab = TAB_HOME;
+        showMessage("识别完成，请确认衣物");
+        render();
     }
 
     private void saveGarment() {
         String name = draftName.trim();
         if (name.isEmpty()) {
-            setStatus("衣物名称不能为空");
+            showMessage("请填写衣物名称");
             return;
         }
         if (draftPhotoPath == null || draftSignature == null) {
-            setStatus("请先选择衣物照片");
+            showMessage("请先选择衣物照片");
             return;
         }
         if (!Category.isValid(draftCategory)) {
@@ -716,8 +1183,8 @@ public class MainActivity extends Activity {
                 name,
                 draftCategory,
                 parseColor(draftColor, Category.accentColor(draftCategory)),
-                draftBrand,
-                draftNote,
+                draftBrand.trim(),
+                draftNote.trim(),
                 draftPhotoPath,
                 draftSignature,
                 now,
@@ -731,13 +1198,17 @@ public class MainActivity extends Activity {
         draftPhotoPath = null;
         draftSignature = null;
         selectedGarmentId = garment.id;
+        if (garmentDialog != null && garmentDialog.isShowing()) {
+            garmentDialog.dismiss();
+        }
         reloadData();
-        setStatus(garment.name + " 已加入衣橱");
+        showMessage(garment.name + " 已加入衣橱");
+        render();
     }
 
     private void saveWearRecord() {
         if (!canSaveWearRecord()) {
-            setStatus("需要相机照片、当天日期和至少一件衣物");
+            showMessage("需要当天相机照片和至少一件已确认衣物");
             return;
         }
         WearRecord record = new WearRecord(
@@ -749,14 +1220,15 @@ public class MainActivity extends Activity {
                 selectedFor(Category.BOTTOM),
                 selectedFor(Category.SHOES),
                 GarmentRecognizer.summarize(recognitionSlots),
-                recordNote
+                recordNote.trim()
         );
         database.saveWearRecord(record);
         recordPhotoPath = null;
         recordNote = "";
         recognitionSlots.clear();
         reloadData();
-        setStatus("今日穿着已记录");
+        showMessage("今日穿着已记录");
+        render();
     }
 
     private boolean canSaveWearRecord() {
@@ -789,7 +1261,6 @@ public class MainActivity extends Activity {
         if (selectedGarmentId == null && !garments.isEmpty()) {
             selectedGarmentId = garments.get(0).id;
         }
-        statusMessage = garments.isEmpty() ? "先导入衣物照片" : "本地数据已就绪";
     }
 
     private List<Garment> activeGarments() {
@@ -810,16 +1281,6 @@ public class MainActivity extends Activity {
             }
         }
         return visible;
-    }
-
-    private Garment selectedGarment() {
-        if (selectedGarmentId != null) {
-            Garment selected = garmentById(selectedGarmentId);
-            if (selected != null) {
-                return selected;
-            }
-        }
-        return garments.isEmpty() ? null : garments.get(0);
     }
 
     private Garment garmentById(String id) {
@@ -883,34 +1344,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Spinner categorySpinner(String selected, Consumer<String> onSelected) {
-        Spinner spinner = new Spinner(this);
-        String[] labels = {"上衣", "裤子", "鞋"};
-        String[] values = {Category.TOP, Category.BOTTOM, Category.SHOES};
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
-        int selectedIndex = 0;
-        for (int index = 0; index < values.length; index++) {
-            if (values[index].equals(selected)) {
-                selectedIndex = index;
-                break;
-            }
-        }
-        spinner.setSelection(selectedIndex);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                onSelected.accept(values[position]);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        return spinner;
-    }
-
     private Spinner garmentSpinner(String category, String selectedId, Consumer<String> onSelected) {
         Spinner spinner = new Spinner(this);
+        spinner.setPadding(dp(8), 0, dp(5), 0);
+        spinner.setBackground(rounded(FIELD, LINE, dp(8)));
         ArrayList<Garment> items = new ArrayList<>();
         ArrayList<String> labels = new ArrayList<>();
         labels.add("未选择");
@@ -920,7 +1357,19 @@ public class MainActivity extends Activity {
                 labels.add(garment.name);
             }
         }
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                View view = super.getView(position, convertView, parent);
+                if (view instanceof TextView) {
+                    ((TextView) view).setTextSize(12);
+                    ((TextView) view).setTextColor(INK);
+                    ((TextView) view).setSingleLine(true);
+                }
+                return view;
+            }
+        };
+        spinner.setAdapter(adapter);
         int selectedIndex = 0;
         for (int index = 0; index < items.size(); index++) {
             if (items.get(index).id.equals(selectedId)) {
@@ -928,48 +1377,11 @@ public class MainActivity extends Activity {
                 break;
             }
         }
-        spinner.setSelection(selectedIndex);
+        spinner.setSelection(selectedIndex, false);
         spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 onSelected.accept(position == 0 ? null : items.get(position - 1).id);
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        return spinner;
-    }
-
-    private Spinner periodSpinner() {
-        Spinner spinner = new Spinner(this);
-        String[] labels = {"7天", "30天", "90天", "今年", "全部", "自定义"};
-        String[] values = {
-                DateTools.PERIOD_7_DAYS,
-                DateTools.PERIOD_30_DAYS,
-                DateTools.PERIOD_90_DAYS,
-                DateTools.PERIOD_YEAR,
-                DateTools.PERIOD_ALL,
-                DateTools.PERIOD_CUSTOM
-        };
-        spinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
-        int selectedIndex = 1;
-        for (int index = 0; index < values.length; index++) {
-            if (values[index].equals(periodPreset)) {
-                selectedIndex = index;
-                break;
-            }
-        }
-        spinner.setSelection(selectedIndex);
-        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                String next = values[position];
-                if (!next.equals(periodPreset)) {
-                    periodPreset = next;
-                    render();
-                }
             }
 
             @Override
@@ -991,33 +1403,50 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
-    private void setStatus(String message) {
-        statusMessage = message;
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-        render();
+    private ActionButton actionButton(String label, boolean primary, String iconName) {
+        ActionButton button = new ActionButton(label, primary, iconName);
+        button.setMinimumHeight(dp(46));
+        button.setPadding(dp(14), 0, dp(14), 0);
+        button.setBackground(rounded(primary ? GREEN : CARD, primary ? GREEN : LINE, dp(8)));
+        button.setClickable(true);
+        button.setFocusable(true);
+        return button;
     }
 
-    private void addTitle(LinearLayout parent, String eyebrow, String title) {
-        TextView eyebrowView = text(eyebrow, 12, CLAY, Typeface.BOLD);
-        parent.addView(eyebrowView);
-        TextView titleView = text(title, 26, INK, Typeface.BOLD);
-        parent.addView(titleView);
+    private TextView iconButton(String iconName, String description, int color) {
+        TextView button = text("", 1, color, Typeface.NORMAL);
+        button.setGravity(Gravity.CENTER);
+        button.setContentDescription(description);
+        button.setCompoundDrawablesWithIntrinsicBounds(icon(iconName, color, 21), null, null, null);
+        button.setBackground(rounded(FIELD, LINE, dp(8)));
+        button.setClickable(true);
+        button.setFocusable(true);
+        button.setLayoutParams(new LinearLayout.LayoutParams(dp(42), dp(42)));
+        return button;
     }
 
-    private LinearLayout card() {
-        LinearLayout card = vertical();
-        card.setPadding(dp(14), dp(14), dp(14), dp(14));
-        card.setBackground(rounded(CARD, LINE, dp(8)));
-        LinearLayout.LayoutParams params = matchWrap();
-        params.setMargins(0, dp(12), 0, 0);
-        card.setLayoutParams(params);
-        return card;
+    private TextView actionBanner(String message, String command) {
+        TextView banner = text(message + "    " + command, 12, GREEN_DARK, Typeface.BOLD);
+        banner.setGravity(Gravity.CENTER_VERTICAL);
+        banner.setPadding(dp(12), dp(11), dp(10), dp(11));
+        banner.setCompoundDrawablePadding(dp(8));
+        banner.setCompoundDrawablesWithIntrinsicBounds(icon(AppIconDrawable.WARDROBE, GREEN, 17), null,
+                icon(AppIconDrawable.CHEVRON, GREEN, 16), null);
+        banner.setBackground(rounded(GREEN_TINT, GREEN_TINT, dp(8)));
+        return banner;
     }
 
-    private TextView labelBlock(String label, String value) {
-        TextView textView = text(label + "\n" + value, 15, INK, Typeface.BOLD);
-        textView.setLineSpacing(dp(2), 1);
-        return textView;
+    private View sectionHeader(String title, String caption) {
+        LinearLayout row = horizontal();
+        row.setGravity(Gravity.BOTTOM);
+        TextView heading = text(title, 18, INK, Typeface.BOLD);
+        row.addView(heading, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(text(caption, 11, MUTED, Typeface.NORMAL));
+        return row;
+    }
+
+    private TextView fieldLabel(String value) {
+        return text(value, 12, INK, Typeface.BOLD);
     }
 
     private EditText editText(String hint, String value, Consumer<String> onChange) {
@@ -1025,11 +1454,11 @@ public class MainActivity extends Activity {
         editText.setHint(hint);
         editText.setText(value == null ? "" : value);
         editText.setTextColor(INK);
-        editText.setHintTextColor(0xff978b7e);
+        editText.setHintTextColor(0xff9aa29e);
         editText.setTextSize(14);
         editText.setSingleLine(false);
-        editText.setBackground(rounded(0xffffffff, LINE, dp(7)));
-        editText.setPadding(dp(10), dp(8), dp(10), dp(8));
+        editText.setBackground(rounded(FIELD, LINE, dp(8)));
+        editText.setPadding(dp(12), dp(10), dp(12), dp(10));
         editText.addTextChangedListener(new SimpleTextWatcher() {
             @Override
             public void afterTextChanged(Editable editable) {
@@ -1039,57 +1468,44 @@ public class MainActivity extends Activity {
         return editText;
     }
 
-    private Button button(String label, boolean primary) {
-        Button button = new Button(this);
-        button.setAllCaps(false);
-        button.setText(label);
-        button.setTextSize(14);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        button.setTextColor(primary ? Color.WHITE : INK);
-        button.setBackground(rounded(primary ? PINE : 0xffffffff, primary ? PINE : LINE, dp(7)));
-        button.setPadding(dp(12), 0, dp(12), 0);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                dp(42)
-        );
-        params.setMargins(0, 0, dp(8), 0);
-        button.setLayoutParams(params);
-        return button;
+    private View emptyState(String iconName, String title, String caption) {
+        LinearLayout state = vertical();
+        state.setGravity(Gravity.CENTER);
+        state.setPadding(dp(18), dp(26), dp(18), dp(26));
+        state.setBackground(rounded(CARD, LINE, dp(8)));
+        ImageView iconView = new ImageView(this);
+        iconView.setImageDrawable(icon(iconName, 0xff95a19c, 28));
+        state.addView(iconView, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        TextView heading = text(title, 14, INK, Typeface.BOLD);
+        heading.setGravity(Gravity.CENTER);
+        addWithTop(state, heading, dp(9));
+        TextView description = text(caption, 12, MUTED, Typeface.NORMAL);
+        description.setGravity(Gravity.CENTER);
+        addWithTop(state, description, dp(4));
+        return state;
     }
 
-    private TextView text(String value, int sp, int color, int style) {
-        TextView textView = new TextView(this);
-        textView.setText(value);
-        textView.setTextSize(sp);
-        textView.setTextColor(color);
-        textView.setTypeface(Typeface.DEFAULT, style);
-        textView.setIncludeFontPadding(true);
-        return textView;
-    }
-
-    private TextView muted(String value) {
-        return text(value, 13, MUTED, Typeface.NORMAL);
-    }
-
-    private TextView empty(String value) {
-        TextView textView = text(value, 13, MUTED, Typeface.BOLD);
-        textView.setGravity(Gravity.CENTER);
-        textView.setPadding(dp(14), dp(20), dp(14), dp(20));
-        textView.setBackground(rounded(0xfffffaf4, 0xffcabfae, dp(8)));
-        return textView;
+    private ImageView photoPlaceholder(String iconName, int sizeDp) {
+        ImageView image = new ImageView(this);
+        image.setImageDrawable(icon(iconName, 0xff99a49f, 26));
+        image.setBackground(rounded(FIELD, LINE, dp(8)));
+        image.setPadding(dp(28), dp(28), dp(28), dp(28));
+        image.setContentDescription("暂无图片");
+        image.setMinimumHeight(dp(sizeDp));
+        return image;
     }
 
     private ImageView image(String path, int heightDp) {
         ImageView imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        imageView.setBackgroundColor(0xffebe2d5);
+        imageView.setBackground(rounded(0xffedf0ee, 0xffedf0ee, dp(8)));
+        imageView.setClipToOutline(true);
         imageView.setAdjustViewBounds(false);
-        imageView.setMinimumHeight(dp(heightDp));
+        imageView.setContentDescription("衣物照片");
         Bitmap bitmap = ImageStore.loadBitmap(path, Math.max(320, heightDp * 3));
         if (bitmap != null) {
             imageView.setImageBitmap(bitmap);
         }
-        imageView.setClipToOutline(false);
         imageView.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 dp(heightDp)
@@ -1102,28 +1518,25 @@ public class MainActivity extends Activity {
         if (garment == null) {
             return;
         }
-        ImageView image = image(garment.photoPath, 76);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(76), 1);
-        params.setMargins(0, 0, dp(6), 0);
+        ImageView image = image(garment.photoPath, 50);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(40), dp(50));
+        params.rightMargin = dp(4);
         parent.addView(image, params);
     }
 
-    private String bar(int count) {
-        if (count <= 0) {
-            return "";
-        }
-        int length = Math.min(16, count);
-        StringBuilder builder = new StringBuilder();
-        for (int index = 0; index < length; index++) {
-            builder.append('|');
-        }
-        return builder.toString();
+    private AppIconDrawable icon(String name, int color, int sizeDp) {
+        return new AppIconDrawable(name, color, dp(sizeDp), 1.8f);
     }
 
-    private void addWithTop(LinearLayout parent, View view, int topMargin) {
-        LinearLayout.LayoutParams params = matchWrap();
-        params.setMargins(0, topMargin, 0, 0);
-        parent.addView(view, params);
+    private TextView text(String value, int sp, int color, int style) {
+        TextView textView = new TextView(this);
+        textView.setText(value);
+        textView.setTextSize(sp);
+        textView.setTextColor(color);
+        textView.setTypeface(Typeface.create("sans", style));
+        textView.setIncludeFontPadding(true);
+        textView.setLetterSpacing(0);
+        return textView;
     }
 
     private LinearLayout vertical() {
@@ -1145,11 +1558,41 @@ public class MainActivity extends Activity {
         );
     }
 
+    private LinearLayout.LayoutParams weightedWrap() {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+    }
+
+    private LinearLayout.LayoutParams weightedWrapWithMargins(int margin) {
+        LinearLayout.LayoutParams params = weightedWrap();
+        params.leftMargin = margin;
+        params.rightMargin = margin;
+        return params;
+    }
+
+    private void addWithTop(LinearLayout parent, View view, int topMargin) {
+        LinearLayout.LayoutParams params = matchWrap();
+        params.topMargin = topMargin;
+        parent.addView(view, params);
+    }
+
+    private void addWithTop(LinearLayout parent, View view, int topMargin, LinearLayout.LayoutParams params) {
+        params.topMargin = topMargin;
+        parent.addView(view, params);
+    }
+
     private GradientDrawable rounded(int fill, int stroke, int radius) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(fill);
         drawable.setCornerRadius(radius);
         drawable.setStroke(dp(1), stroke);
+        return drawable;
+    }
+
+    private GradientDrawable circle(int fill, int stroke) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(fill);
+        drawable.setStroke(dp(2), stroke);
         return drawable;
     }
 
@@ -1176,8 +1619,16 @@ public class MainActivity extends Activity {
         return builder.toString();
     }
 
+    private boolean same(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
     private String id(String prefix) {
         return prefix + "_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private void showMessage(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
     }
 
     private abstract static class SimpleTextWatcher implements TextWatcher {
@@ -1187,6 +1638,38 @@ public class MainActivity extends Activity {
 
         @Override
         public void onTextChanged(CharSequence s, int start, int before, int count) {
+        }
+    }
+
+    private final class ActionButton extends LinearLayout {
+        private final TextView labelView;
+
+        ActionButton(String label, boolean primary, String iconName) {
+            super(MainActivity.this);
+            setOrientation(HORIZONTAL);
+            setGravity(Gravity.CENTER);
+            int color = primary ? Color.WHITE : GREEN;
+            if (iconName != null) {
+                ImageView iconView = new ImageView(MainActivity.this);
+                iconView.setImageDrawable(icon(iconName, color, 18));
+                LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(20), dp(20));
+                iconParams.rightMargin = dp(8);
+                addView(iconView, iconParams);
+            }
+            labelView = text(label, 14, primary ? Color.WHITE : INK, Typeface.BOLD);
+            addView(labelView);
+        }
+
+        void setTextColor(int color) {
+            labelView.setTextColor(color);
+        }
+
+        @Override
+        public void setEnabled(boolean enabled) {
+            super.setEnabled(enabled);
+            for (int index = 0; index < getChildCount(); index++) {
+                getChildAt(index).setEnabled(enabled);
+            }
         }
     }
 }
