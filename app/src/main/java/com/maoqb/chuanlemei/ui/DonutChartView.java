@@ -33,11 +33,14 @@ public final class DonutChartView extends View {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         float density = getResources().getDisplayMetrics().density;
-        float size = Math.min(getWidth(), getHeight()) - 16 * density;
-        float left = (getWidth() - size) / 2f;
-        float top = (getHeight() - size) / 2f;
-        oval.set(left, top, left + size, top + size);
-        float stroke = Math.max(14 * density, size * 0.16f);
+        float available = Math.min(getWidth(), getHeight());
+        float stroke = Math.max(14 * density, available * 0.16f);
+        float edgePadding = 8 * density;
+        float diameter = Math.max(0, available - stroke - edgePadding * 2);
+        float centerX = getWidth() / 2f;
+        float centerY = getHeight() / 2f;
+        float radius = diameter / 2f;
+        oval.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
 
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(stroke);
@@ -67,10 +70,10 @@ public final class DonutChartView extends View {
         paint.setColor(textColor);
         paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
         paint.setTextSize(26 * getResources().getDisplayMetrics().scaledDensity);
-        canvas.drawText(String.valueOf(total), getWidth() / 2f, getHeight() / 2f + 2 * density, paint);
+        canvas.drawText(String.valueOf(total), centerX, centerY + 2 * density, paint);
         paint.setTypeface(Typeface.DEFAULT);
         paint.setColor(mutedColor);
         paint.setTextSize(11 * getResources().getDisplayMetrics().scaledDensity);
-        canvas.drawText("衣物计次", getWidth() / 2f, getHeight() / 2f + 22 * density, paint);
+        canvas.drawText("衣物计次", centerX, centerY + 22 * density, paint);
     }
 }

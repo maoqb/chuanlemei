@@ -36,6 +36,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.maoqb.chuanlemei.data.DemoDataSeeder;
 import com.maoqb.chuanlemei.data.ImageStore;
 import com.maoqb.chuanlemei.data.WardrobeDatabase;
 import com.maoqb.chuanlemei.domain.Category;
@@ -123,6 +124,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         configureWindow();
         database = new WardrobeDatabase(this);
+        DemoDataSeeder.seedIfEmpty(this, database);
         reloadData();
         buildShell();
         render();
