@@ -1,82 +1,87 @@
 # 方案设计
 
-## 产品结构
+## 总体方案
 
-`穿了没` 首版做成本地优先 PWA，第一屏就是可用工具，不做登录和后端。核心工作区分为四个页签：
+首版改为 Android 原生 app，使用单 Activity + 原生 View 直接构建界面，不引入 Compose、CameraX 或后端服务。这样能在当前机器快速构建出可安装 APK，并把相机拍照、日期校验、衣物计次和本地识别链路完整跑通。
 
-| 页签 | 作用 |
+## 模块划分
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| UI | `MainActivity.java` | 四个页签、相机/图库 Intent、表单、统计展示 |
+| 数据模型 | `domain/Garment.java`、`domain/WearRecord.java` | 衣物和穿着记录 |
+| 日期与周期 | `domain/DateTools.java`、`domain/PeriodRange.java` | 当天校验、周期范围、日期展示 |
+| 统计 | `domain/StatsCalculator.java` | 单件计次、周期统计、组合统计 |
+| 存储 | `data/WardrobeDatabase.java` | SQLite 表结构和 CRUD |
+| 图片文件 | `data/ImageStore.java` | 图片解码、压缩、内部文件保存 |
+| 识别 | `vision/ImageSignature.java`、`vision/GarmentRecognizer.java` | 图片签名、候选排序、置信度 |
+
+## 数据结构
+
+### garments
+
+| 字段 | 说明 |
 | --- | --- |
-| 记录 | 调用相机拍照，校验日期，自动识别上衣/裤子/鞋并保存穿着记录 |
-| 衣橱 | 导入衣物照片和基础资料，生成识别特征 |
-| 组合 | 查看上衣、裤子、鞋的组合预览和周期内常穿组合 |
-| 统计 | 按周期查看记录量、衣物计次、日历趋势和衣物排行 |
+| `id` | 衣物 ID |
+| `name` | 衣物名称 |
+| `category` | `top` / `bottom` / `shoes` |
+| `color` | 主色 |
+| `brand` | 品牌 |
+| `note` | 备注 |
+| `photo_path` | App 内部保存的衣物图片路径 |
+| `signature` | 图片识别签名 |
+| `created_at` / `updated_at` / `archived_at` | 生命周期字段 |
 
-## 技术选型
+### wear_records
 
-| 模块 | 方案 | 说明 |
-| --- | --- | --- |
-| 前端 | React 19 + TypeScript + Vite | 快速迭代，适合 PWA |
-| 存储 | IndexedDB | 本地保存衣物、记录和照片证据 |
-| 相机 | `navigator.mediaDevices.getUserMedia` | 记录次数必须从相机拍照进入 |
-| 识别 | 浏览器 Canvas 图片特征 | 不上传照片，首版无云服务依赖 |
-| 测试 | Vitest + jsdom | 覆盖日期、统计、识别核心逻辑 |
-| 离线 | 手写 Service Worker | 首次加载后缓存同源资源 |
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 记录 ID |
+| `worn_at` | 穿着日期，格式 `YYYY-MM-DD` |
+| `captured_at` | 拍照保存时间 |
+| `photo_path` | App 内部保存的相机照片路径 |
+| `top_id` / `bottom_id` / `shoes_id` | 关联衣物 |
+| `recognition_summary` | 识别结果摘要 |
+| `note` | 备注 |
 
-## 数据模型
+## 拍照记录流程
 
-### Garment
+1. 用户进入“记录”页。
+2. 点击“调用相机拍照并识别”。
+3. App 通过 `MediaStore.ACTION_IMAGE_CAPTURE` 调起系统相机。
+4. 相机把照片写入 `MediaStore` URI。
+5. App 读取照片，压缩保存到内部 `files/photos`。
+6. App 生成照片 `ImageSignature`。
+7. `GarmentRecognizer` 按上衣、裤子、鞋分别匹配已导入衣物。
+8. 用户确认识别结果。
+9. 保存前校验 `recordDate` 必须等于本地当天。
+10. 写入 SQLite。
 
-衣物记录包含：
+## 识别算法
 
-- `id`
-- `name`
-- `category`: `top`、`bottom`、`shoes`
-- `color`
-- `brand`
-- `note`
-- `imageDataUrl`
-- `signature`
-- `createdAt`
-- `updatedAt`
-- `archivedAt`
+当前算法是本地 MVP：
 
-### WearRecord
+1. 把图片缩放到 72x72。
+2. 对像素计算 64 桶 RGB 颜色直方图。
+3. 同时计算平均 RGB。
+4. 用直方图交集和平均颜色距离组合成 0 到 1 的置信度。
+5. 每个分类保留 Top 3 候选。
+6. 置信度大于 0.42 时自动选中，否则只展示候选。
 
-穿着记录包含：
+这个接口后续可以保持不变，把实现替换为 TensorFlow Lite 或云端视觉模型。
 
-- `id`
-- `wornAt`: `YYYY-MM-DD`
-- `capturedAt`
-- `evidencePhotoDataUrl`
-- `garmentIds`
-- `recognition`
-- `note`
+## 构建与自测
 
-## 识别流程
+已验证：
 
-1. 衣橱导入图片时，Canvas 缩放到固定尺寸。
-2. 从像素里计算 64 桶 RGB 直方图和平均颜色。
-3. 拍照后对相机图片计算同样的特征。
-4. 按上衣、裤子、鞋分组计算相似度。
-5. 每个类别展示最多 3 个候选，达到阈值时自动选中。
-6. 用户确认后写入穿着记录。
+```bash
+./gradlew testDebugUnitTest
+./gradlew assembleDebug
+```
 
-这个方案的优势是无后端、无训练成本、隐私简单；不足是复杂背景、相近颜色和全身照遮挡会影响精度。后续升级时可以保留 `recognizeGarments` 接口，替换为模型推理。
+单元测试覆盖：
 
-## 日期与计次规则
-
-- 记录日期默认本地当天。
-- 保存前必须满足 `wornAt === today`。
-- 每条穿着记录按类别最多关联一件上衣、一条裤子、一双鞋。
-- 衣物穿着次数按记录中的衣物引用计数。
-- 穿搭组合按同一条记录里的衣物集合聚合。
-
-## 后续迭代建议
-
-| 优先级 | 方向 | 内容 |
-| --- | --- | --- |
-| P1 | 识别增强 | 加入物体检测/分割，分别识别上衣、裤子、鞋区域 |
-| P1 | 拍照体验 | 支持前后摄像头切换、连拍、裁剪 |
-| P2 | 数据能力 | 增加清洗周期、闲置提醒、每次成本 |
-| P2 | 同步 | 增加账户、云备份、多设备同步 |
-| P3 | 搭配 | 按天气、场景、颜色冲突给出组合建议 |
+- 日期格式和日期范围
+- 图片签名相似度
+- 自动识别候选
+- 周期统计、单件计次、组合统计
