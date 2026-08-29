@@ -614,8 +614,9 @@ public class MainActivity extends Activity {
         if (garmentDialog != null && garmentDialog.isShowing()) {
             garmentDialog.dismiss();
         }
-        garmentDialog = new Dialog(this);
-        garmentDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        Dialog dialog = new Dialog(this);
+        garmentDialog = dialog;
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -634,7 +635,7 @@ public class MainActivity extends Activity {
         titleCopy.addView(text("正面照片越清晰，自动识别越准确", 11, MUTED, Typeface.NORMAL));
         titleRow.addView(titleCopy, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         ImageView close = iconButton(AppIconDrawable.CLOSE, "关闭", MUTED);
-        close.setOnClickListener(view -> garmentDialog.dismiss());
+        close.setOnClickListener(view -> dialog.dismiss());
         titleRow.addView(close);
         form.addView(titleRow);
 
@@ -681,9 +682,13 @@ public class MainActivity extends Activity {
         save.setOnClickListener(view -> saveGarment());
         addWithTop(form, save, dp(18));
 
-        garmentDialog.setContentView(scroll);
-        garmentDialog.setOnDismissListener(dialog -> garmentDialog = null);
-        Window window = garmentDialog.getWindow();
+        dialog.setContentView(scroll);
+        dialog.setOnDismissListener(dismissed -> {
+            if (garmentDialog == dialog) {
+                garmentDialog = null;
+            }
+        });
+        Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawableResource(android.R.color.transparent);
             window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
@@ -691,7 +696,7 @@ public class MainActivity extends Activity {
             params.dimAmount = 0.46f;
             window.setAttributes(params);
         }
-        garmentDialog.show();
+        dialog.show();
         if (window != null) {
             int width = getResources().getDisplayMetrics().widthPixels - dp(24);
             int height = Math.round(getResources().getDisplayMetrics().heightPixels * 0.88f);
